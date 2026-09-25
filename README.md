@@ -22,6 +22,8 @@ This refreshes the complete revised histories, fits the models, validates the th
 ./mighte review
 ```
 
+**FluSight-ensemble**, **UMass-flusion**, and **Google_SAI-FluEns** are selectable comparisons, alongside the official FluSight baseline. Their curves and prospective scores appear when the hub publishes forecasts for the corresponding week, target and location. Unavailable curve options are disabled. Use `./mighte review --offline` to rebuild from cached inputs and comparison forecasts without network requests.
+
 When the forecasts look right:
 
 ```bash
@@ -64,7 +66,7 @@ The preserved LightGBM center uses L2 loss on log-scale change. Under its Gaussi
 
 ## ED historical reconstruction
 
-The public national NSSP influenza series starts **October 2022**, so a pre-pandemic NSSP calibration cannot currently be obtained from the checked public sources. The safe initial setting is `ed_history.mode: observed`, which fits the ED model on observed NSSP history. Two explicit reconstruction paths are implemented:
+The downloadable national NSSP target feed starts **October 2022**. CDC has published pre-pandemic NSSP influenza ED curves, but a downloadable weekly series for that period was not obtained. The initial setting is `ed_history.mode: observed`, which fits the ED model on observed NSSP history. Two explicit reconstruction paths are implemented:
 
 - `post2022_proxy`: fit normalized national ILINet to log1p national ED percentage on available post-2022 overlap; apply that mapping to older location ILINet, then shift it forward **728 days**. This is an unvalidated assumption that the mapping transfers across eras and locations.
 - `prepandemic_proxy`: use a supplied repository-local CSV of pre-pandemic national NSSP, with `date,value` where `value` is a proportion. Set `historical_nssp_file` to its relative path. At least 52 paired weeks are required.

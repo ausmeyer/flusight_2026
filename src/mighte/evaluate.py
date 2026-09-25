@@ -15,7 +15,7 @@ from .pipeline import verify_run
 from .util import digest, utc_now, write_json
 
 LOCAL_BASELINE = "Local-persistence"
-BENCHMARKS = ("FluSight-baseline", "FluSight-ensemble", "UMass-flusion")
+BENCHMARKS = ("FluSight-baseline", "FluSight-ensemble", "UMass-flusion", "Google_SAI-FluEns")
 
 
 def prospective_runs(root: Path) -> list[Path]:
@@ -50,7 +50,7 @@ def load_archive(root: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def fetch_benchmarks(root: Path, references: list[str]) -> tuple[pd.DataFrame, list[dict]]:
+def fetch_benchmarks(root: Path, references: list[str], *, online=True) -> tuple[pd.DataFrame, list[dict]]:
     frames, status = [], []
     for reference in sorted(set(references)):
         for model in BENCHMARKS:
@@ -58,15 +58,21 @@ def fetch_benchmarks(root: Path, references: list[str]) -> tuple[pd.DataFrame, l
             path = root / "data/benchmarks" / model / filename
             url = HUB + f"model-output/{model}/{filename}"
             try:
-                response = requests.get(url, timeout=(15, 40))
-                if response.status_code == 404:
-                    status.append({"model": model, "reference_date": reference, "status": "not published"})
+                if online:
+                    response = requests.get(url, timeout=(15, 40))
+                    if response.status_code == 404:
+                        status.append({"model": model, "reference_date": reference, "status": "not published"})
+                        continue
+                    response.raise_for_status()
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(response.content)
+                    write_json(path.with_suffix(".source.json"), {"url": url, "retrieved_at": utc_now(), "sha256": digest(path)})
+                    state = "refreshed"
+                elif path.exists():
+                    state = "cached (offline)"
+                else:
+                    status.append({"model": model, "reference_date": reference, "status": "not cached"})
                     continue
-                response.raise_for_status()
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(response.content)
-                write_json(path.with_suffix(".source.json"), {"url": url, "retrieved_at": utc_now(), "sha256": digest(path)})
-                state = "refreshed"
             except requests.RequestException as exc:
                 state = "cached (refresh failed)" if path.exists() else "unavailable"
                 status.append({"model": model, "reference_date": reference, "status": state, "reason": str(exc)})
@@ -172,13 +178,18 @@ def summarize(scored: pd.DataFrame, *, baseline=LOCAL_BASELINE, location="states
     return pd.DataFrame(records)
 
 
-def evaluate(root: Path, snapshot: Path, *, online=True):
+def evaluate(root: Path, snapshot: Path, *, online=True, comparison_references=()):
     archive = load_archive(root)
-    if archive.empty:
-        return pd.DataFrame(), [], pd.DataFrame()
-    benchmarks, status = fetch_benchmarks(root, archive.reference_date.unique().tolist()) if online else (pd.DataFrame(), [])
+    prospective = [] if archive.empty else archive.reference_date.unique().tolist()
+    references = sorted(set(prospective) | set(comparison_references))
+    benchmarks, status = fetch_benchmarks(root, references, online=online)
+    scoring_archive = archive
     if not benchmarks.empty:
+        # A peer forecast can be displayed for a rehearsal, but only genuine
+        # prospective MIGHTE weeks contribute to the accuracy comparison.
+        eligible = benchmarks[benchmarks.reference_date.isin(prospective)]
+        scoring_archive = pd.concat([archive, eligible], ignore_index=True)
         archive = pd.concat([archive, benchmarks], ignore_index=True)
     truth = pd.read_csv(snapshot / "truth.csv", dtype={"location": str})
-    scores = score_quantiles(archive, truth)
+    scores = score_quantiles(scoring_archive, truth)
     return scores, status, archive

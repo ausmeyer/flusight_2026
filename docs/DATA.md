@@ -14,7 +14,7 @@ Hub rules and target data are retrieved from a single commit pinned when acquisi
 | WastewaterSCAN | CDC `ymmh-divb`, source='WastewaterSCAN', pcr_target='fluav' | Complete raw history; equal-site weekly aggregation and frozen lag rules. |
 | Locations and submission rules | FluSight `auxiliary-data/locations.csv` and `hub-config/` | Snapshot with every acquisition and check again before a PR. |
 
-CDC metadata paths are `https://data.cdc.gov/api/views/DATASET.json`; observation paths are `https://data.cdc.gov/resource/DATASET.json`. Hub sources are at `https://github.com/cdcepi/FluSight-forecast-hub`. The hub data may be fresher during the season; it is automatically preferred when its file update is more recent. Both source copies remain available for inspection. Source priority and counts appear in each snapshot manifest.
+CDC metadata paths are `https://data.cdc.gov/api/views/DATASET.json`; observation paths are `https://data.cdc.gov/resource/DATASET.json`. The [2026–27 hub documentation](https://github.com/cdcepi/FluSight-forecast-hub#emergency-department-visits) says ED target data will be updated Wednesday by midday, pending availability, ahead of the Friday public release. The pipeline automatically prefers hub values when their file update is more recent. Both source copies remain available for inspection. Source priority and counts appear in each snapshot manifest.
 
 ## Historical training data
 
@@ -26,7 +26,7 @@ Observed gaps strictly between observed dates are linearly interpolated for trai
 
 `ilinet_normalized.csv` is the frozen per-location transformed ILINet input produced by the existing `bestNormalize(ILI + 1)` preprocessing. The recorded source CSV contains those transformed values, not raw ILI percentages. Bundling it preserves the exact historical input without requiring an R environment or a neighboring checkout.
 
-The public NSSP/Delphi sources checked on September 25, 2026 begin in October 2022. No pre-pandemic national NSSP influenza observations were found. The ED reconstruction implementation consequently has explicit observed-only, post-2022-calibration, and user-supplied pre-pandemic-calibration modes. The latter two regress log1p national ED percentage on normalized national ILINet, apply the fitted relationship to location ILINet through June 30, 2019, and shift dates forward by 728 days, matching the hospitalization proxy's historical cutoff. The national-to-state transfer and any transfer across eras are assumptions, not validated conclusions. No pseudo-observation is used for evaluation.
+The downloadable NSSP/Delphi target feeds checked on September 25, 2026 begin in October 2022. CDC published pre-pandemic national influenza ED curves in [MMWR 70(15):573](https://www.cdc.gov/mmwr/volumes/70/wr/mm7015a7.htm), but a machine-readable weekly series for that period was not obtained. That figure was not digitized into training observations. The ED reconstruction implementation consequently has explicit observed-only, post-2022-calibration, and user-supplied pre-pandemic-calibration modes. The latter two regress log1p national ED percentage on normalized national ILINet, apply the fitted relationship to location ILINet through June 30, 2019, and shift dates forward by 728 days, matching the hospitalization proxy's historical cutoff. The national-to-state transfer and any transfer across eras are assumptions, not validated conclusions. No pseudo-observation is used for evaluation.
 
 ## Prospective safeguards
 

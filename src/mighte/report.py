@@ -9,7 +9,7 @@ from plotly.offline import get_plotlyjs
 
 from .contract import UNIT, read_forecast
 from .data import latest_snapshot, verify_snapshot
-from .evaluate import evaluate, summarize
+from .evaluate import BENCHMARKS, LOCAL_BASELINE, evaluate, summarize
 from .pipeline import verify_run
 from .util import utc_now, write_json
 
@@ -22,7 +22,8 @@ def build_report(root: Path, run: Path, *, online=True) -> Path:
     manifest = verify_run(root, run)
     snapshot = latest_snapshot(root)
     verify_snapshot(snapshot)
-    scores, benchmark_status, archive = evaluate(root, snapshot, online=online)
+    scores, benchmark_status, archive = evaluate(root, snapshot, online=online,
+                                                comparison_references=[manifest["reference_date"]])
     current = pd.concat([read_forecast(run / filename).assign(model_id=Path(filename).parent.name)
                          for filename in manifest["output_hashes"]], ignore_index=True)
     if not archive.empty:
@@ -42,7 +43,8 @@ def build_report(root: Path, run: Path, *, online=True) -> Path:
                "data_audit": json.loads((run / "data-audit.json").read_text()),
                "forecasts": records(chart), "truth": records(truth[["date", "target", "location", "value"]]),
                "scores": records(scores.drop(columns=[c for c in scores.columns if isinstance(c, float)], errors="ignore")),
-               "locations": records(locations[["location", "location_name"]]), "benchmarks": benchmark_status}
+               "locations": records(locations[["location", "location_name"]]), "benchmarks": benchmark_status,
+               "comparison_models": list(BENCHMARKS), "baseline_models": [LOCAL_BASELINE, *BENCHMARKS]}
     output = root / "reports" / manifest["run_id"]
     output.mkdir(parents=True, exist_ok=True)
     if not scores.empty:
@@ -68,7 +70,7 @@ body{margin:0}main{max-width:1450px;margin:auto;padding:28px 32px 50px}h1{font-s
 .preview{background:#fff1cf;color:#805908}.card{margin-top:22px;border:1px solid #dce4e8;border-radius:13px;background:white;padding:22px;box-shadow:0 2px 3px #19333e04}
 h2{font-size:18px;margin:0 0 15px}.controls{display:flex;gap:16px;align-items:end;flex-wrap:wrap}label{font-size:12px;font-weight:650;display:flex;flex-direction:column;gap:7px}
 select{font:inherit;min-width:160px;border:1px solid #c5d2d9;border-radius:6px;padding:8px;background:white;color:#213f50}
-.checks{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0 0}.checks label{display:block}.checks input{accent-color:#167f87}
+.checks{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0 0}.checks label{display:block}.checks label:has(input:disabled){opacity:.45}.checks input{accent-color:#167f87}
 #chart{width:100%;height:440px}.tablewrap{overflow-x:auto;margin-top:15px}table{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 th{text-align:right;padding:11px 10px;background:#f0f5f7;color:#46606e;font-size:11px}td{text-align:right;padding:12px 10px;border-top:1px solid #e4ecef}th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:white}
 .positive{color:#157267}.negative{color:#a24141}.empty{padding:30px;text-align:center;color:#6f808a}.stats{display:flex;gap:35px;flex-wrap:wrap;margin:20px 0 5px}.stat strong{font-size:23px;display:block}.stat span{font-size:12px;color:#637984}
@@ -82,7 +84,7 @@ details{margin-top:14px;font-size:13px}summary{cursor:pointer;color:#396575}pre{
 <label>Location<select id="location"></select></label></div><div id="models" class="checks"></div><div id="chart"></div>
 </section>
 <section class="card"><h2>Prospective accuracy to date</h2><div class="controls">
-<label>Comparison baseline<select id="baseline"><option>Local-persistence</option><option>FluSight-baseline</option><option>FluSight-ensemble</option></select></label>
+<label>Comparison baseline<select id="baseline"></select></label>
 <label>Scoring locations<select id="scope"><option value="states">States + DC + Puerto Rico</option><option value="US">United States</option><option value="all">All (includes national)</option><option value="selected">Selected location above</option></select></label>
 <label>Horizon<select id="horizon"><option value="all">All horizons</option><option value="0">0 · nowcast</option><option value="1">1 week ahead</option><option value="2">2 weeks ahead</option><option value="3">3 weeks ahead</option></select></label>
 </div><div id="accuracy" class="tablewrap"></div>
@@ -100,11 +102,13 @@ el('status').classList.toggle('preview',D.manifest.preview);
 el('stats').innerHTML=`<div class="stat"><strong>3</strong><span>submission models</span></div><div class="stat"><strong>0–3</strong><span>forecast horizons</span></div><div class="stat"><strong>${D.manifest.settings.runtime.num_bags}</strong><span>fits per boosted component</span></div><div class="stat"><strong>${new Set(D.scores.map(r=>r.reference_date)).size}</strong><span>prospective weeks with truth</span></div>`;
 options('reference',[...new Set(D.forecasts.map(r=>r.reference_date))].sort().reverse().map(x=>[x,x]));el('reference').value=D.manifest.reference_date;
 options('location',D.locations.filter(x=>D.forecasts.some(r=>r.location===x.location)).sort((a,b)=>a.location_name.localeCompare(b.location_name)).map(x=>[x.location,x.location_name]));el('location').value='US';
-const modelNames=[...new Set(D.forecasts.map(r=>r.model_id))].sort();
+options('baseline',D.baseline_models.map(m=>[m,m]));
+const modelNames=[...new Set([...D.forecasts.map(r=>r.model_id),...D.comparison_models])].sort();
 el('models').innerHTML=modelNames.map((m,i)=>`<label><input type="checkbox" value="${esc(m)}" ${m.startsWith('MIGHTE')?'checked':''}> ${esc(m)}</label>`).join('');
-const colors={'MIGHTE-Base':'#007f89','MIGHTE-Linear':'#db8744','MIGHTE-Nsemble':'#7555ac','Local-persistence':'#7c8a96','FluSight-baseline':'#a5a08d','FluSight-ensemble':'#ae4861','UMass-flusion':'#4c73b7'};
+const colors={'MIGHTE-Base':'#007f89','MIGHTE-Linear':'#db8744','MIGHTE-Nsemble':'#7555ac','Local-persistence':'#7c8a96','FluSight-baseline':'#a5a08d','FluSight-ensemble':'#ae4861','UMass-flusion':'#4c73b7','Google_SAI-FluEns':'#428449'};
 const rgba=(hex,a)=>`rgba(${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)},${a})`;
 function plot(){const ref=el('reference').value,target=el('target').value,loc=el('location').value,mult=target.includes('prop')?100:1;
+el('models').querySelectorAll('input').forEach(input=>{input.disabled=!D.forecasts.some(r=>r.reference_date===ref&&r.target===target&&r.location===loc&&r.model_id===input.value)});
 const traces=[],chosen=[...el('models').querySelectorAll('input:checked')].map(x=>x.value);
 const begin=new Date(ref);begin.setDate(begin.getDate()-120);const end=new Date(ref);end.setDate(end.getDate()+28);
 const truth=D.truth.filter(r=>r.target===target&&r.location===loc&&new Date(r.date)>=begin&&new Date(r.date)<=end&&r.value!==null).sort((a,b)=>a.date.localeCompare(b.date));

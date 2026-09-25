@@ -18,4 +18,16 @@ Automated checks cover calendar alignment, covariate cutoffs, future-data invari
 
 WIS is checked against an independent weighted-interval formula. Tests cover matched skill denominators, coverage, revised truth, and undefined zero-baseline scores. The interactive report was exercised with synthetic scored forecasts for hospitalization and ED targets; displayed values were checked against Python calculations. Synthetic scores remain outside the prospective archive. The report was checked in the browser with target, location, baseline and horizon filters; explanatory chart notes were removed.
 
+The comparison-model update passes 42 local tests and linting. Browser checks confirm selectable FluSight-ensemble, UMass-flusion and Google_SAI-FluEns curves and baseline choices, with matching Python scores. Tests verify cached offline comparisons and that fetching a comparison for a preview never adds that week to prospective accuracy. Unpublished comparison options remain visible and disabled in the current report. An isolated import check also read the actual May 30, 2026 files for all four public comparisons; those files were not fitted or scored and remain outside the prospective archive.
+
 Registration and submission are separate, explicitly confirmed commands. Tests exercise cancellation without a GitHub request, upload allowlists, preview rejection, and a final deadline check before PR creation. CI only runs local tests and validation; it never submits forecasts or opens a hub PR.
+
+## Full current-input rehearsal
+
+The September 26, 2026 preview completed using the September 25 revised-data snapshot and the preserved historical training adjustment. All four boosted components completed 100 fits, and the linear fit completed. Runtime was about 46 minutes on the development computer with two component workers. The three serialized files passed local hub-contract validation: 9,568 rows for Base and 4,876 each for Linear and Nsemble. All 53 hospitalization locations and the 51 ED locations with current observations were covered. Recomputing the fixed one-third ensemble from its saved components reproduced all 4,876 final rounded quantiles exactly.
+
+This was one forecast origin using current inputs, not a retrospective performance study. It is stored under `runs/previews/2026-09-26/20260925T193624628497Z`, cannot be submitted, and contributes no prospective accuracy rows. The ED fit used observed history; pre-pandemic reconstruction still requires the weekly historical NSSP input described in `DATA.md`.
+
+## Clean installation and CI
+
+Commit `c5f603f` was cloned from GitHub into a new temporary directory. The documented `./mighte setup` command created its own environment; all 39 tests, linting and metadata checks passed with the package loaded from that clone. The same commit passed [Linux GitHub CI](https://github.com/ausmeyer/flusight_2026/actions/runs/36180915580). No neighboring research directory was needed.
