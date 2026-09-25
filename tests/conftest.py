@@ -26,5 +26,6 @@ def history():
     dates = pd.date_range("2016-01-02", "2026-10-03", freq="W-SAT")
     weeks = np.arange(len(dates))
     return pd.concat([pd.DataFrame({"location_name": name, "date": dates,
-                                    "total_hosp": 50 + i * 20 + 15 * np.sin(weeks / 8) + .05 * weeks})
+                                    "total_hosp": np.round(50 + i * 20 + 15 * np.sin(weeks / 8) + .05 * weeks
+                                        + np.random.default_rng(42 + i).normal(0, 4, len(dates)), 6)})
                       for i, name in enumerate(["Alabama", "Alaska", "US"])], ignore_index=True)

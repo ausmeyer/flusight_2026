@@ -122,3 +122,14 @@ def test_deadline_rechecked_after_github_preparation(tmp_path, monkeypatch):
                   branch="codex/test", title="test", body="test", reference="2026-10-10")
     assert checks == ["2026-10-10", "2026-10-10"]
     assert not any(endpoint.endswith("/pulls") for endpoint, _ in requests)
+
+
+def test_registration_cancellation_makes_no_github_request(root, monkeypatch, capsys):
+    from mighte import cli
+
+    monkeypatch.chdir(root)
+    monkeypatch.setattr("sys.argv", ["mighte", "register"])
+    monkeypatch.setattr("builtins.input", lambda prompt: "cancel")
+    monkeypatch.setattr(cli, "register", lambda root: pytest.fail("Registration was not approved"))
+    cli.main()
+    assert "Registration cancelled" in capsys.readouterr().out

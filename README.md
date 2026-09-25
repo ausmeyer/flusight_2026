@@ -40,7 +40,7 @@ The two new models require metadata registration; the existing ensemble descript
 ./mighte register
 ```
 
-This creates a metadata-only PR using [these descriptions](model-metadata/) and [this PR text](docs/REGISTRATION_PR.md). Wait for CDC to merge it before submitting weekly forecasts. Austin Meyer and Mauricio Santillana are listed on all three models, with contact details from the existing public MIGHTE-Nsemble metadata. Base and Nsemble are designated by default; Linear remains submitted and evaluated. The hub normally allows two designated models per team. Historical MIGHTE-Joint metadata is left intact; the registration PR explains the intended active lineup.
+This displays [the PR text](docs/REGISTRATION_PR.md) for review. Inspect [the descriptions](model-metadata/) and type `register` only when ready to send the metadata-only PR. Complete local testing before registration; previews, tests and ordinary repository pushes never open forecast-hub PRs. Wait for CDC to merge the registration before submitting weekly forecasts. Austin Meyer and Mauricio Santillana are listed on all three models, with contact details from the existing public MIGHTE-Nsemble metadata. Base and Nsemble are designated by default; Linear remains submitted and evaluated. The hub normally allows two designated models per team. Historical MIGHTE-Joint metadata is left intact; the registration PR explains the intended active lineup.
 
 ## Before the season / quick installation check
 

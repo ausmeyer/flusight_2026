@@ -42,7 +42,8 @@ def main():
             p.add_argument("--offline", action="store_true", help="Skip fetching public benchmark forecasts")
         if command == "submit":
             p.add_argument("--yes", action="store_true", help="Confirm that these exact files were reviewed")
-    sub.add_parser("register", help="Open the metadata-only registration/update PR")
+    p = sub.add_parser("register", help="Review and confirm the metadata-only registration/update PR")
+    p.add_argument("--yes", action="store_true", help="Confirm that the metadata and PR text were reviewed")
     sub.add_parser("check", help="Check local metadata, environment and fixed model settings")
     args = parser.parse_args()
     root = project_root()
@@ -57,6 +58,12 @@ def main():
             print("Metadata and standalone imports OK")
             return
         if args.command == "register":
+            Contract(root / "hub-contract").validate_metadata(root / "model-metadata")
+            print((root / "docs/REGISTRATION_PR.md").read_text())
+            print("Files: model-metadata/MIGHTE-{Base,Linear,Nsemble}.yml")
+            if not args.yes and input("Type register to open the CDC metadata pull request: ").strip() != "register":
+                print("Registration cancelled.")
+                return
             print(register(root))
             return
         if args.command in {"forecast", "preview", "resume"}:

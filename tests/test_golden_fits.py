@@ -14,12 +14,12 @@ def test_ported_models_match_study_golden_values(root, tmp_path, history):
     settings = json.loads((root / "tests/fixtures/settings.json").read_text())
     dates = pd.date_range("2016-01-02", "2026-10-03", freq="W-SAT")
     weeks = np.arange(len(dates))
-    wastewater = pd.DataFrame({"date": dates, WW: np.sin(weeks / 5) - 3,
+    wastewater = pd.DataFrame({"date": dates, WW: np.round(np.sin(weeks / 5) - 3, 6),
                                 "available_date": dates + pd.Timedelta(weeks=2)})
     for lag in [1, 2, 4]:
         wastewater[WW + "_lag" + str(lag)] = wastewater[WW].shift(lag)
     wastewater.to_csv(tmp_path / "wastewater.csv", index=False)
-    pd.DataFrame({"date": dates, NSSP: 2 + np.sin(weeks / 9),
+    pd.DataFrame({"date": dates, NSSP: np.round(2 + np.sin(weeks / 9), 6),
                    "available_date": dates + pd.Timedelta(weeks=1)}).to_csv(tmp_path / "nssp.csv", index=False)
     locations = {"Alabama": "01", "Alaska": "02", "US": "US"}
     with threadpool_limits(limits=2):

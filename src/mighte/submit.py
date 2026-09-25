@@ -56,14 +56,19 @@ def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, bo
         repo = gh_json(["api", f"repos/{UPSTREAM}/forks", "--method", "POST"], {})
     if not repo.get("fork") or repo.get("parent", {}).get("full_name", UPSTREAM) != UPSTREAM:
         raise ValueError(f"{fork} is not a fork of {UPSTREAM}")
-    existing = gh_json(["api", f"repos/{UPSTREAM}/pulls?state=open&head={login}:{branch}"])
+    history = gh_json(["api", f"repos/{UPSTREAM}/pulls?state=all&head={login}:{branch}"])
+    existing = next((pr for pr in history if pr["state"] == "open"), None)
     if existing:
         # Do not silently edit a previous PR. Return it only if every uploaded byte matches.
         for name, path in files.items():
             remote = gh_json(["api", f"repos/{fork}/contents/{name}?ref={branch}"])
             if base64.b64decode(remote["content"]) != path.read_bytes():
-                raise ValueError(f"Open PR {existing[0]['html_url']} differs from these files; close it or review the existing revision first")
-        return existing[0]["html_url"]
+                raise ValueError(f"Open PR {existing['html_url']} differs from these files; close it or review the existing revision first")
+        return existing["html_url"]
+    if history:
+        # A deliberately closed PR stays closed. A later, explicitly requested
+        # submission uses a new branch instead of reopening the old discussion.
+        branch += "-" + utc_now().replace("-", "").replace(":", "").replace(".", "").split("+")[0]
     head = gh_json(["api", f"repos/{UPSTREAM}/git/ref/heads/main"])["object"]["sha"]
     commit = gh_json(["api", f"repos/{UPSTREAM}/git/commits/{head}"])
     # Obtain the upstream commit in the fork without resetting any branch.
