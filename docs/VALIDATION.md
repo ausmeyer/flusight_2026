@@ -24,11 +24,21 @@ FluSight-ensemble, UMass-flusion and Google_SAI-FluEns remain available as compa
 
 Registration and submission are separate, explicitly confirmed commands. Tests exercise cancellation without a GitHub request, upload allowlists, preview rejection, and a final deadline check before PR creation. CI only runs local tests and validation; it never submits forecasts or opens a hub PR.
 
-## Full current-input rehearsal
+## Initial current-input rehearsal
 
 The September 26, 2026 preview completed using the September 25 revised-data snapshot and the preserved historical training adjustment. All four boosted components completed 100 fits, and the linear fit completed. Runtime was about 46 minutes on the development computer with two component workers. The three serialized files passed local hub-contract validation: 9,568 rows for Base and 4,876 each for Linear and Nsemble. All 53 hospitalization locations and the 51 ED locations with current observations were covered. Recomputing the fixed one-third ensemble from its saved components reproduced all 4,876 final rounded quantiles exactly.
 
 This was one forecast origin using current inputs, not a retrospective performance study. It is stored under `runs/previews/2026-09-26/20260925T193624628497Z`, cannot be submitted, and contributes no prospective accuracy rows. The ED fit used observed history; pre-pandemic reconstruction still requires the weekly historical NSSP input described in `DATA.md`.
+
+## ED response-link correction
+
+The production ED response now uses changes in log-odds of canonical proportions. Its input boundary is fixed at 0.00005, or 0.005 percentage points, half the reporting increment observed in the current NSSP data. This replaces the one-percentage-point additive offset implied by log1p of percentage points. Input boundary handling does not change truth or predictor histories, and inverse-link forecast quantiles are not floored at that boundary. Optional ED reconstruction uses the same link. The initial preview above retains the earlier transformation and remains unchanged.
+
+All 58 local tests pass, including the original hospitalization golden forecasts. New checks cover finite boundary handling, interior round trips, explicit unit conversion, log-odds changes and anchor integration against an independent formula, proportion export, quantile ordering, and rejection of ED checkpoints with missing or incompatible transformation metadata. Existing synthetic workflows exercise both serial and parallel orchestration with the corrected ED fit. A full-round, single-fit check on the current ED data produced 4,692 valid quantiles. These checks establish implementation behavior; they do not establish prospective interval coverage or an optimal boundary convention.
+
+The complete rerun is `runs/previews/2026-09-26/20260925T212404979138Z`, using a fresh acquisition at `20260925T212341670563Z`. All four boosted components completed 100 fits, plus Linear, in about 46 minutes. The three exported files passed hub-contract validation with the same row and location coverage as the initial rehearsal. The refreshed input values matched the previous snapshot, and all 14,628 final hospitalization quantiles across the three models matched exactly. ED quantiles reconstructed independently from all 100 checkpoints matched the export within 2.2e-13 in proportion units. There were 74 boundary observations among 10,608 ED training values and no boundary observations at the current anchors.
+
+The national ED horizon-3 median is 0.96%, with a 95% prediction interval of 0.38–2.27%, compared with the initial preview's 1.11% and 0.66–1.65%. The report payload agrees with the exported quantiles, and the regenerated national ED chart was checked in the browser. The run remains a non-submittable preview with no prospective accuracy rows.
 
 ## Clean installation and CI
 
