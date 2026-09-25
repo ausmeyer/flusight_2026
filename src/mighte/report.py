@@ -138,7 +138,7 @@ el('status').classList.toggle('preview',D.manifest.preview);
 const references=[...new Set(D.forecasts.map(r=>r.reference_date))].sort();
 options('reference',[...references].reverse().map(x=>[x,x]));el('reference').value=D.manifest.reference_date;
 el('week-slider').max=references.length-1;el('week-slider').disabled=references.length<2;
-options('location',D.locations.filter(x=>D.forecasts.some(r=>r.location===x.location)).sort((a,b)=>a.location_name.localeCompare(b.location_name)).map(x=>[x.location,x.location_name]));el('location').value='US';
+options('location',D.locations.filter(x=>D.forecasts.some(r=>r.location===x.location)).sort((a,b)=>(b.location==='US')-(a.location==='US')||a.location_name.localeCompare(b.location_name)).map(x=>[x.location,x.location_name]));el('location').value='US';
 options('baseline',D.baseline_models.map(m=>[m,m]));
 const modelNames=[...new Set([...D.forecasts.map(r=>r.model_id),...D.comparison_models])].sort();
 const colors=D.model_colors;
