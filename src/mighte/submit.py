@@ -105,7 +105,6 @@ def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, bo
     receipt = {"url": url, "branch": branch, "commit": new_commit["sha"],
                "submitted_at": utc_now(), "files": {name: digest(path) for name, path in files.items()}}
     write_json(root / ".runtime" / (branch.replace("/", "-") + ".json"), receipt)
-    print(url, flush=True)
     return url
 
 

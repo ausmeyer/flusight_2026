@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mighte.contract import ED, HOSP, read_forecast
+from mighte.contract import CATEGORIES, ED, HOSP, TREND, UNIT, read_forecast
 from mighte.data import NSSP, WW
 from mighte.evaluate import load_archive, prospective_runs
 from mighte.pipeline import run_forecasts, verify_run
@@ -14,7 +14,8 @@ from mighte.submit import create_pr
 from mighte.util import digest, write_json
 
 
-def test_whole_offline_preview_and_submission_guard(root, tmp_path):
+@pytest.mark.parametrize("with_ordinal", [False, True])
+def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch, with_ordinal):
     """Exercise orchestration, serializers and guards in a separate project directory."""
     for directory in ["config", "hub-contract", "data/historical"]:
         shutil.copytree(root / directory, tmp_path / directory)
@@ -22,6 +23,18 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path):
     settings["runtime"].update(num_bags=1, stage1_rounds=10, stage2_rounds=10, min_train_rows=100)
     settings["panel_ar_runtime"]["min_train_rows"] = 100
     settings["threads"] = 2
+    settings["component_workers"] = 1
+    if with_ordinal:
+        from mighte import ordinal
+
+        def fixture_ordinal(context):
+            assert context["hospitalization_history"].date.max() == pd.Timestamp("2026-10-03")
+            units = context["base_hospitalization_quantiles"][UNIT].drop_duplicates()
+            return pd.concat([units.assign(target=TREND, output_type="pmf", output_type_id=c, value=.2)
+                              for c in CATEGORIES], ignore_index=True)
+
+        monkeypatch.setattr(ordinal, "predict", fixture_ordinal)
+        settings["ordinal_plugin"] = "mighte.ordinal:predict"
     write_json(tmp_path / "config/settings.json", settings)
     snapshot = tmp_path / "data/snapshots/test-snapshot"
     shutil.copytree(root / "hub-contract", snapshot / "contract")
@@ -36,6 +49,8 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path):
                                       "value": factor * (2 + np.sin(w / 8))})
                        for loc in ["01", "02", "US"] for target, factor in [(HOSP, 100), (ED, .005)]])
     truth.to_csv(snapshot / "truth.csv", index=False)
+    pd.DataFrame({"date": dates.repeat(3), "location_name": ["Alabama", "Alaska", "US"] * len(dates),
+                  "scale_factor": 1.}).to_csv(snapshot / "ed-fractions.csv", index=False)
     pd.DataFrame({"date": dates, NSSP: 1 + .5 * np.sin(w / 8),
                    "available_date": dates + pd.Timedelta(weeks=1)}).to_csv(snapshot / "nssp.csv", index=False)
     ww = pd.DataFrame({"date": dates, WW: np.sin(w / 8) - 3,
@@ -46,9 +61,18 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path):
     write_json(snapshot / "manifest.json", {"files": {str(p.relative_to(snapshot)): digest(p)
                 for p in snapshot.rglob("*") if p.is_file()}})
     run = run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
+    settings["component_workers"] = 2
+    write_json(tmp_path / "config/settings.json", settings)
+    parallel_run = run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
+    for path in (run / "model-output").rglob("*.csv"):
+        assert path.read_bytes() == (parallel_run / path.relative_to(run)).read_bytes()
     manifest = verify_run(tmp_path, run)
-    assert manifest["validation"]["MIGHTE-Base"]["rows"] == 3 * 2 * 4 * 23
+    assert manifest["validation"]["MIGHTE-Base"]["rows"] == 3 * 2 * 4 * 23 + (3 * 4 * 5 if with_ordinal else 0)
     assert len(manifest["output_hashes"]) == 3
+    for model in ["MIGHTE-Linear", "MIGHTE-Nsemble"]:
+        assert manifest["validation"][model]["targets"] == [HOSP]
+    if with_ordinal:
+        assert TREND in manifest["validation"]["MIGHTE-Base"]["targets"]
     with pytest.raises(ValueError, match="cannot be submitted"):
         verify_run(tmp_path, run, for_submission=True)
     assert load_archive(tmp_path).empty

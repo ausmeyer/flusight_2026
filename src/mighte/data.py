@@ -27,6 +27,7 @@ class Downloader:
     def __init__(self, directory: Path):
         self.directory = directory
         self.sources = []
+        self.hub_revision = None
         self.session = requests.Session()
         self.session.headers["User-Agent"] = "MIGHTE-FluSight/2026.1"
         self.session.mount("https://", HTTPAdapter(max_retries=Retry(
@@ -68,10 +69,21 @@ class Downloader:
             raise ValueError(f"No rows returned by CDC dataset {dataset}")
         return pd.DataFrame(rows), updated
 
+    def pin_hub(self) -> str:
+        head = json.loads(self.get(API + "commits/main", "raw/hub-head.json"))
+        self.hub_revision = head["sha"]
+        return self.hub_revision
+
+    def hub_file(self, remote: str, local: str) -> bytes:
+        if self.hub_revision is None:
+            self.pin_hub()
+        return self.get(HUB.removesuffix("main/") + self.hub_revision + "/" + remote, local)
+
     def hub_truth(self, filename: str) -> tuple[pd.DataFrame, str]:
-        data = self.get(HUB + "target-data/" + filename, "raw/hub-" + filename)
+        data = self.hub_file("target-data/" + filename, "raw/hub-" + filename)
         commits = json.loads(self.get(API + "commits", "raw/" + filename + "-commits.json",
-                                      {"path": "target-data/" + filename, "per_page": 1}))
+                                      {"path": "target-data/" + filename, "per_page": 1,
+                                       "sha": self.hub_revision}))
         updated = commits[0]["commit"]["committer"]["date"]
         return pd.read_csv(io.BytesIO(data), dtype={"location": str}), updated
 
@@ -140,7 +152,7 @@ def refresh(root: Path) -> Path:
                               ("hub-config/model-metadata-schema.json", "model-metadata-schema.json"),
                               ("hub-config/validations.yml", "validations.yml"),
                               ("auxiliary-data/locations.csv", "locations.csv")]:
-            download.get(HUB + remote, "contract/" + local)
+            download.hub_file(remote, "contract/" + local)
         contract = Contract(staging / "contract")
         location_names = dict(zip(contract.locations.location_name, contract.locations.location))
         abbreviations = dict(zip(contract.locations.abbreviation, contract.locations.location))
@@ -155,7 +167,7 @@ def refresh(root: Path) -> Path:
         hosp_sources.append(("FluSight hub", hub_hosp, hub_hosp_time))
         hosp, hosp_audit = choose_truth(hosp_sources, HOSP)
 
-        raw_ed, ed_time = download.socrata("rdmq-nq56", "week_end,geography,percent_visits_influenza",
+        raw_ed, ed_time = download.socrata("rdmq-nq56", "week_end,geography,percent_visits_influenza,percent_visits_combined",
                                            "county='All'")
         frame = pd.DataFrame({"date": raw_ed.week_end,
                               "location": raw_ed.geography.replace({"United States": "US"}).map(location_names),
@@ -171,10 +183,19 @@ def refresh(root: Path) -> Path:
         # about the actual publication date. Retrieval timestamps establish what was known.
         national["available_date"] = national.date + pd.Timedelta(weeks=1)
         national.to_csv(staging / "nssp.csv", index=False, date_format="%Y-%m-%d")
+        # The old hospitalization stitch used flu / combined respiratory ED visits
+        # when constructing legacy training values and the regime-calibration proxy.
+        fractions = pd.DataFrame({"date": pd.to_datetime(raw_ed.week_end),
+                                  "location_name": raw_ed.geography.replace({"United States": "US"}),
+                                  "scale_factor": pd.to_numeric(raw_ed.percent_visits_influenza, errors="coerce")
+                                      / pd.to_numeric(raw_ed.percent_visits_combined, errors="coerce").replace(0, np.nan)})
+        fractions = fractions[fractions.location_name.isin(location_names)]
+        fractions.to_csv(staging / "ed-fractions.csv", index=False, date_format="%Y-%m-%d")
         raw_ww, _ = download.socrata("ymmh-divb", "site,sample_collect_date,pcr_target_mic_lin",
                                      "source='WastewaterSCAN' AND pcr_target='fluav'")
         wastewater_weekly(raw_ww).to_csv(staging / "wastewater.csv", index=False, date_format="%Y-%m-%d")
         manifest = {"snapshot_id": stamp, "completed_at": utc_now(), "sources": download.sources,
+                    "hub_revision": download.hub_revision,
                     "hospitalizations": hosp_audit, "ed": ed_audit,
                     "files": {str(p.relative_to(staging)): digest(p) for p in sorted(staging.rglob("*"))
                               if p.is_file()}}
@@ -218,6 +239,58 @@ def weekly_grid(frame: pd.DataFrame, anchor: pd.Timestamp) -> tuple[pd.DataFrame
     return pd.concat(parts, ignore_index=True), interpolated
 
 
+def attach_ed_fraction(frame: pd.DataFrame, fractions: pd.DataFrame) -> pd.DataFrame:
+    """Original stitch: carry fractions forward within location; leading missing = 1."""
+    parts = []
+    for name, group in frame.groupby("location_name", sort=True):
+        values = fractions.loc[fractions.location_name.eq(name), ["date", "scale_factor"]].set_index("date").scale_factor
+        if values.index.duplicated().any():
+            raise ValueError(f"Duplicate ED fractions for {name}")
+        values = values.reindex(values.index.union(pd.DatetimeIndex(group.date))).sort_index().ffill().fillna(1)
+        parts.append(group.assign(scale_factor=group.date.map(values)))
+    return pd.concat(parts, ignore_index=True)
+
+
+def hospitalization_history(root: Path, snapshot: Path, observed: pd.DataFrame, anchor: pd.Timestamp):
+    """Preserve the study's legacy ED fraction and bounded state-specific log shift."""
+    observed = observed[observed.date.le(anchor)].copy()
+    # Preserve the recorded fraction exactly; one ULP can change count rounding.
+    fractions = pd.read_csv(snapshot / "ed-fractions.csv", parse_dates=["date"], float_precision="round_trip")
+    fractions = fractions[fractions.date.le(anchor)]
+    proxy = pd.read_csv(root / "data/historical/hospitalization_calibration.csv", parse_dates=["date"],
+                        float_precision="round_trip")
+    proxy = attach_ed_fraction(proxy[proxy.date.le(anchor)], fractions)
+    proxy["proxy_hosp"] = np.rint(proxy.proxy_hosp_continuous * proxy.scale_factor)
+    paired = observed[observed.date.ge("2021-07-01")].merge(
+        proxy[["date", "location_name", "proxy_hosp"]], on=["date", "location_name"], validate="one_to_one")
+    paired["residual"] = np.log1p(paired.total_hosp.clip(lower=0)) - np.log1p(paired.proxy_hosp)
+    paired = paired[np.isfinite(paired.residual)].copy()
+    shifts = []
+    for name in sorted(observed.location_name.unique()):
+        group = paired[paired.location_name.eq(name)]
+        legacy = group.loc[group.date.lt("2024-11-01"), "residual"]
+        current = group.loc[group.date.ge("2024-11-01"), "residual"]
+        delta = float(np.clip(current.median() - legacy.median(), -np.log(2), np.log(2))) if len(legacy) >= 26 and len(current) >= 8 else 0.
+        shifts.append({"location_name": name, "shift_legacy_to_current": delta,
+                       "n_legacy": len(legacy), "n_current": len(current)})
+    shift_table = pd.DataFrame(shifts)
+    seed = pd.read_csv(root / "data/historical/hospitalization_proxy.csv", parse_dates=["date"])
+    seed = seed[seed.location_name.isin(observed.location_name.unique()) & seed.date.le(anchor)]
+    model = pd.concat([seed, observed[observed.date.ge("2021-07-01")]], ignore_index=True)
+    model = attach_ed_fraction(model, fractions)
+    early = model.date.lt("2024-05-01")
+    model.loc[early, "total_hosp"] = np.rint(np.rint(model.loc[early, "total_hosp"]) * model.loc[early, "scale_factor"])
+    model, interpolated = weekly_grid(model[["location_name", "date", "total_hosp"]], anchor)
+    model = model.merge(shift_table[["location_name", "shift_legacy_to_current"]], on="location_name", validate="many_to_one")
+    legacy = model.date.lt("2024-11-01")
+    model.loc[legacy, "total_hosp"] = np.rint(np.maximum(np.expm1(
+        np.log1p(model.loc[legacy, "total_hosp"].clip(lower=0)) + model.loc[legacy, "shift_legacy_to_current"]), 0))
+    return model[["location_name", "date", "total_hosp"]], interpolated, {
+        "method": "Original ED-fraction preprocessing before May 2024; original legacy-to-current log shift before November 2024",
+        "max_multiplier": 2, "minimum_legacy_weeks": 26, "minimum_current_weeks": 8,
+        "calibration_predictor_end": proxy.date.max().date().isoformat(), "locations": shift_table.to_dict("records")}
+
+
 def reconstruct_ed(root: Path, observed: pd.DataFrame, settings: dict) -> tuple[pd.DataFrame, dict]:
     mode = settings["mode"]
     if mode == "observed":
@@ -233,19 +306,22 @@ def reconstruct_ed(root: Path, observed: pd.DataFrame, settings: dict) -> tuple[
         if not path.is_relative_to(root.resolve()):
             raise ValueError("Historical NSSP must be stored inside this standalone repository")
         national = pd.read_csv(path, parse_dates=["date"])
+        if national.date.duplicated().any() or not national.date.dt.weekday.eq(5).all():
+            raise ValueError("Historical national NSSP requires one observation per Saturday week ending")
         if not national.value.between(0, 1).all() or (national.date >= "2020-03-01").any():
             raise ValueError("Historical national NSSP must contain pre-pandemic proportions in [0,1]")
         national = national.rename(columns={"value": "total_hosp"})
         national["total_hosp"] *= 100
     else:
         national = observed[observed.location_name.eq("US")]
-    paired = ili[ili.location_name.eq("US")].merge(national[["date", "total_hosp"]], on="date").dropna()
+    paired = ili[ili.location_name.eq("US")].merge(national[["date", "total_hosp"]], on="date",
+                                                   validate="one_to_one").dropna()
     if len(paired) < 52 or paired.ili.std() < 1e-8:
         raise ValueError("At least 52 paired weeks with varying ILINet are required for ED reconstruction")
     design = np.column_stack([np.ones(len(paired)), paired.ili])
     coefficients = np.linalg.lstsq(design, np.log1p(paired.total_hosp), rcond=None)[0]
-    # The same 728-day shift and biological cutoff as the hospitalization proxy.
-    proxy = ili[ili.date.le("2020-05-30")].copy()
+    # Use the same source-history cutoff and 728-day shift as hospitalization.
+    proxy = ili[ili.date.le("2019-06-30")].copy()
     proxy["total_hosp"] = np.clip(np.expm1(coefficients[0] + coefficients[1] * proxy.ili), 0, 100)
     proxy["date"] += pd.Timedelta(days=728)
     proxy = proxy[proxy.location_name.isin(observed.location_name.unique())]
@@ -277,14 +353,13 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
         history = history[history.location.isin(eligible)]
         model = history[["location_name", "date", "value"]].rename(columns={"value": "total_hosp"})
         if target == HOSP:
-            seed = pd.read_csv(root / "data/historical/hospitalization_proxy.csv", parse_dates=["date"])
-            model = pd.concat([seed, model[model.date.ge("2022-06-04")]], ignore_index=True)
+            model, n_filled, adjustment = hospitalization_history(root, snapshot, model, anchor)
+            audit["hospitalization_adjustment"] = adjustment
         else:
             model["total_hosp"] *= 100  # model in percentage points; submit in proportions
             model, reconstruction = reconstruct_ed(root, model, settings["ed_history"])
             audit["ed_reconstruction"] = reconstruction
-        model = model[model.location_name.isin(current.location_name)]
-        model, n_filled = weekly_grid(model, anchor)
+            model, n_filled = weekly_grid(model, anchor)
         inputs[target] = model
         audit[target] = {"anchor": anchor.date().isoformat(), "locations": sorted(eligible),
                           "excluded_locations": sorted(allowed - eligible), "training_rows": len(model),

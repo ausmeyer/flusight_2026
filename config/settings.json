@@ -68,5 +68,6 @@
     "historical_nssp_file": null
   },
   "ordinal_plugin": null,
-  "threads": 4
+  "threads": 4,
+  "component_workers": 2
 }

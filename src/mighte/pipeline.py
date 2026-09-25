@@ -4,7 +4,9 @@ import importlib
 import importlib.metadata
 import json
 import platform
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
+from multiprocessing import get_context
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +37,20 @@ def write_forecast(path: Path, frame: pd.DataFrame) -> None:
     frame[COLUMNS].sort_values(["target", "location", "horizon", "output_type", "output_type_id"]).to_csv(
         temp, index=False, float_format="%.12g")
     temp.replace(path)
+
+
+def fit_component(name, target, signals, run, snapshot, reference, settings, location_map):
+    """Each process owns one component's checkpoints and output file."""
+    path = run / "components" / f"{name}.csv"
+    if path.exists():
+        return read_forecast(path)
+    history = pd.read_csv(run / ("hospitalization-training.csv" if target == HOSP else "ed-training.csv"),
+                          parse_dates=["date"])
+    with threadpool_limits(limits=int(settings["threads"])):
+        result = distributional(history, snapshot, reference, settings, signals, target,
+                                name, run / "checkpoints" / name, location_map)
+    write_forecast(path, result)
+    return read_forecast(path)
 
 
 def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
@@ -97,25 +113,27 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
     for target, history in histories.items():
         history.to_csv(run / ("hospitalization-training.csv" if target == HOSP else "ed-training.csv"), index=False)
 
-    def fit_component(name, target, signals):
-        path = components / f"{name}.csv"
-        if path.exists():
-            return read_forecast(path)
-        result = distributional(histories[target], snapshot, reference, settings, signals, target,
-                                name, run / "checkpoints" / name, location_map)
-        write_forecast(path, result)
-        return read_forecast(path)
-
     with threadpool_limits(limits=int(settings["threads"])):
         linear_file = components / "linear.csv"
         if not linear_file.exists():
             print("Fitting MIGHTE-Linear...", flush=True)
             write_forecast(linear_file, linear(histories[HOSP], reference, settings, location_map))
         linear_frame = read_forecast(linear_file)
-        base_hosp = fit_component("base-hospitalizations", HOSP, ("ww", "nssp"))
-        ww = fit_component("ww-hospitalizations", HOSP, ("ww",))
-        nssp = fit_component("nssp-hospitalizations", HOSP, ("nssp",))
-        ed = fit_component("base-ed", ED, ("ww",))
+    jobs = [("base-hospitalizations", HOSP, ("ww", "nssp")),
+            ("ww-hospitalizations", HOSP, ("ww",)),
+            ("nssp-hospitalizations", HOSP, ("nssp",)), ("base-ed", ED, ("ww",))]
+    args = (run, snapshot, reference, settings, location_map)
+    workers = int(settings.get("component_workers", 2))
+    if workers not in {1, 2}:
+        raise ValueError("component_workers must be 1 or 2")
+    if workers == 1:
+        results = [fit_component(*job, *args) for job in jobs]
+    else:
+        # Spawn avoids inheriting native OpenMP state from the linear fit.
+        with ProcessPoolExecutor(max_workers=workers, mp_context=get_context("spawn")) as executor:
+            futures = [executor.submit(fit_component, *job, *args) for job in jobs]
+            results = [future.result() for future in futures]
+    base_hosp, ww, nssp, ed = results
     forecasts = {"MIGHTE-Base": pd.concat([base_hosp, ed], ignore_index=True),
                  "MIGHTE-Linear": linear_frame,
                  "MIGHTE-Nsemble": equal_quantiles([ww, nssp, linear_frame])}

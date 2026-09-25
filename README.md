@@ -89,7 +89,7 @@ Run paths are printed in the terminal and report. Successful bag predictions are
 - Python 3.11 or 3.12, an internet connection for data refresh, and GitHub CLI only for PRs. The launcher uses a local `.venv`; [uv](https://docs.astral.sh/uv/) is recommended and respects the committed `uv.lock`.
 - On macOS, install LightGBM's OpenMP runtime if needed: `brew install libomp`.
 - Without uv, `./mighte setup` creates a standard virtual environment with pinned direct dependencies. On Windows use `python -m venv .venv`, `.venv\Scripts\python -m pip install -e ".[dev]"`, then `.venv\Scripts\mighte forecast` from the repository directory.
-- The launcher caps native math threads at four. Change `threads` in the settings if needed; this is a runtime control, not a model-selection option.
+- The launcher caps native math threads at four per component. Two independent boosted components run concurrently; set `component_workers` to 1 for lower CPU use. These runtime controls leave the model specification unchanged.
 
 ## Files and reproducibility
 
@@ -102,4 +102,4 @@ Run paths are printed in the terminal and report. Successful bag predictions are
 
 Generated snapshots, runs, reports and credentials are excluded from Git. Back up `runs/` and `data/snapshots/` locally: they are needed to resume and evaluate your actual prospective forecasts. The public hub retains submitted forecasts, but it does not retain these input vintages. A fresh clone can generate the next forecast immediately after setup; it will have an empty private accuracy history until prospective runs are accumulated.
 
-The ordinal integration contract is in [docs/ORDINAL.md](docs/ORDINAL.md). Scoring definitions are in [docs/SCORING.md](docs/SCORING.md). Authoritative requirements: [FluSight hub](https://github.com/cdcepi/FluSight-forecast-hub), [submission rules](https://github.com/cdcepi/FluSight-forecast-hub/blob/main/model-output/README.md), and [metadata rules](https://github.com/cdcepi/FluSight-forecast-hub/blob/main/model-metadata/README.md).
+The ordinal integration contract is in [docs/ORDINAL.md](docs/ORDINAL.md). Scoring definitions are in [docs/SCORING.md](docs/SCORING.md); implementation checks are recorded in [docs/VALIDATION.md](docs/VALIDATION.md). Authoritative requirements: [FluSight hub](https://github.com/cdcepi/FluSight-forecast-hub), [submission rules](https://github.com/cdcepi/FluSight-forecast-hub/blob/main/model-output/README.md), and [metadata rules](https://github.com/cdcepi/FluSight-forecast-hub/blob/main/model-metadata/README.md).

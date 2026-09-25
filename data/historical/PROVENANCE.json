@@ -1,14 +1,24 @@
 {
   "frozen_at": "2026-09-25",
+  "source_recipe": "stitch.Rmd in flusight_2025_meyer_ensemble",
+  "source_recipe_sha256": "aad7c7f5bf3ad3e79f94c324efac9751324b47a5d2738cc8df2b739e97afabfc",
+  "inputs": {
+    "ili/ilinet_2026-04-25.csv": "fdd1479135ed89adb647efa94e4228185e2043a2d201605061a651c963f4e0ee",
+    "eip_cleaned.csv": "8c06e28908d6c88f81cb878f8474558d605922d733e3c0c4ab7ffca93aee302a",
+    "locations.csv": "2ca00c89868a39ff2a87bb1bf3ba0abcd3bb77c4a2870abd2b7ff3920db0c1f1"
+  },
   "hospitalization_proxy": {
-    "source_file": "imputed_and_stitched_hosp_2026-04-25.csv",
-    "source_sha256": "58ff14790fc5fa0c3dd5c9daf34ff6219dc07cce0f1ab35e6e88bd4b4c0f226c",
-    "rows": 27235,
-    "meaning": "Existing ILINet/FluSurv reconstructed, stitched training history through 2022-05-28, including the existing 728-day shift and historical preprocessing. Training only; never evaluation truth."
+    "rows": 24691,
+    "meaning": "Unadjusted ILINet/FluSurv training proxy, original log(rate+1) regression, rate rounded to 2 decimals, original population, count rounding, dates through 2019-06-30 shifted 728 days. Regime adjustment is applied at forecast time."
+  },
+  "hospitalization_calibration": {
+    "rows": 43506,
+    "regression_rows": 2740,
+    "intercept": 0.5253182615607082,
+    "slope": 0.5895968464296275,
+    "meaning": "Unshifted proxy counts before ED fraction and count rounding, used only for original state-specific legacy-regime offsets. Frozen calibration predictor history; observed outcomes and ED fractions are refreshed."
   },
   "ilinet_normalized": {
-    "source_file": "ilinet_2026-05-23.csv",
-    "source_sha256": "331cb0f4bb7a9332884ba934c0de03d5d6f0bcb99d5863498734cec0d9942416",
-    "meaning": "ILINet unweighted ILI plus one transformed per location using the existing R bestNormalize preprocessing. Frozen transformed inputs, not raw ILI percentages; used only for optional historical ED reconstruction."
+    "meaning": "Original per-location bestNormalize(ILI+1) values from the April 25, 2026 study input. These are transformed inputs, not raw percentages."
   }
 }
