@@ -1,0 +1,72 @@
+{
+  "season": "2026-2027",
+  "seed": 20360429,
+  "runtime": {
+    "max_horizons": 4,
+    "anchor_step_weeks": 1,
+    "num_bags": 100,
+    "bag_frac": 0.8,
+    "stage1_rounds": 250,
+    "stage2_rounds": 120,
+    "min_train_rows": 1000,
+    "num_threads": 4,
+    "own_lags": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8,
+      12,
+      26,
+      52
+    ],
+    "donor_top_k": 5,
+    "donor_lags": [
+      1,
+      2,
+      3,
+      4,
+      8,
+      12,
+      52
+    ],
+    "donor_min_overlap": 40
+  },
+  "panel_ar_runtime": {
+    "max_horizons": 4,
+    "anchor_step_weeks": 1,
+    "min_train_rows": 1000,
+    "ar_weeks": [
+      1,
+      2,
+      3,
+      4,
+      8,
+      12,
+      26,
+      52
+    ],
+    "rolling_windows": [
+      2,
+      4,
+      8,
+      12
+    ],
+    "mean_ridge": 0.01,
+    "location_intercept_ridge": 0.02,
+    "horizon_interaction_ridge": 0.02,
+    "partial_slope_ridge": 0.2,
+    "scale_ridge": 0.02,
+    "joint_iterations": 5,
+    "scale_max_iterations": 100,
+    "note": "Both panel AR models directly predict log1p(y[t+h])-log1p(y[t]) from features ending at t. The latest one-week difference is log1p(y[t])-log1p(y[t-1]), and integration begins from y[t] only."
+  },
+  "ed_history": {
+    "mode": "observed",
+    "historical_nssp_file": null
+  },
+  "ordinal_plugin": null,
+  "threads": 4
+}

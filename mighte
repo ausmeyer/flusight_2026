@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+export OMP_NUM_THREADS=4
+export OPENBLAS_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export VECLIB_MAXIMUM_THREADS=4
+if [[ "${1:-}" == "setup" ]]; then
+  if command -v uv >/dev/null 2>&1; then
+    uv sync --locked --extra dev --python 3.11
+  else
+    python3 -m venv .venv
+    .venv/bin/python -m pip install --upgrade pip
+    .venv/bin/python -m pip install -e '.[dev]'
+  fi
+  .venv/bin/python -m mighte.cli check
+  exit 0
+fi
+if [[ ! -x .venv/bin/python ]]; then
+  echo "Run ./mighte setup once, then ./mighte forecast." >&2
+  exit 1
+fi
+if [[ $# -eq 0 ]]; then
+  set -- --help
+fi
+exec .venv/bin/python -m mighte.cli "$@"

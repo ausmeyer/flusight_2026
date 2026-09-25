@@ -1,0 +1,9 @@
+Register MIGHTE-Base and MIGHTE-Linear and update MIGHTE-Nsemble for the 2026–27 season. All three models list Austin Meyer and Mauricio Santillana as contributors and link to the standalone prospective pipeline at https://github.com/ausmeyer/flusight_2026.
+
+- **MIGHTE-Base:** pooled two-stage distributional LightGBM hospitalization forecasts using target history, seasonality, national WastewaterSCAN influenza A and national NSSP influenza ED signals with recent lags. A separate fit of the same template forecasts ED visit proportions using ED history, seasonality and wastewater. Both targets will share one weekly file. An ordinal hospitalization trend model is still under development and is not represented as implemented in this registration.
+- **MIGHTE-Linear:** partially pooled distributional autoregression using hospitalization history and seasonality, with regularized state differences and jointly fitted log-scale mean and uncertainty. Hospitalization forecasts only.
+- **MIGHTE-Nsemble:** fixed equal-third quantile average of wastewater-only and NSSP-only distributional LightGBM components and MIGHTE-Linear. This replaces the previous adaptive ensemble; weights do not change with recent forecast performance. Hospitalization forecasts only.
+
+The intended active designated models are MIGHTE-Base and MIGHTE-Nsemble; MIGHTE-Linear is submitted for evaluation with designated_model=false. Existing MIGHTE-Joint metadata belongs to the earlier collaboration and is not changed by this PR. Please let us know if a separate update to that historical designation is needed to record the active 2026–27 lineup.
+
+No peak timing or peak height targets are planned. Each weekly submission will use horizons 0–3 and the required quantiles, with integer hospitalization values and ED proportions. The metadata were validated locally against the hub's current JSON schema. Forecast-file validation will run on the weekly forecast PRs.

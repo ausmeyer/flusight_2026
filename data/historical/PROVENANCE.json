@@ -1,0 +1,14 @@
+{
+  "frozen_at": "2026-09-25",
+  "hospitalization_proxy": {
+    "source_file": "imputed_and_stitched_hosp_2026-04-25.csv",
+    "source_sha256": "58ff14790fc5fa0c3dd5c9daf34ff6219dc07cce0f1ab35e6e88bd4b4c0f226c",
+    "rows": 27235,
+    "meaning": "Existing ILINet/FluSurv reconstructed, stitched training history through 2022-05-28, including the existing 728-day shift and historical preprocessing. Training only; never evaluation truth."
+  },
+  "ilinet_normalized": {
+    "source_file": "ilinet_2026-05-23.csv",
+    "source_sha256": "331cb0f4bb7a9332884ba934c0de03d5d6f0bcb99d5863498734cec0d9942416",
+    "meaning": "ILINet unweighted ILI plus one transformed per location using the existing R bestNormalize preprocessing. Frozen transformed inputs, not raw ILI percentages; used only for optional historical ED reconstruction."
+  }
+}

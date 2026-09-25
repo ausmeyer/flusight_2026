@@ -1,0 +1,29 @@
+{
+  "source": "joint_twostage_distribution_study",
+  "kernels_sha256": {
+    "RuntimeConfig": "db18f5d45e4d3a916442ae5c46551815a5985f3791b336ae915d3e6d5a6b4661",
+    "infer_flu_season": "3ebe43962a2235e0ef8dca7e18bfbe5b6ea0e7bbadd43a00eac2a656f3165d5c",
+    "add_global_features": "50be354796c50e26877a254f545c38e906999fdc7378c5545b572b1682a1549b",
+    "build_feature_table": "7723e15432b8e74c908ee3495469d3ce6280746bb980b7f0fe20b8182bad77eb",
+    "build_pooled_examples": "f9818c6831971227629a95fc22f15dcfc6397a51b2be68d5a64c6b199bb58b48",
+    "feature_columns": "0cf21d3f8d1e74e1a0526cf7e2d0b59f5d541314cde3744034857373ff1a328e",
+    "_read_external_covariate_file_cached": "682b6e51406477b85292f1199b9948202ae683105f538e3d6fa29ef9befc9727",
+    "read_external_covariate_file": "1fad68d0d05f88a13b9347785be76be45e5b72b0442ee80f61fb9aebb5e57f4e",
+    "add_external_covariates": "bedfe8c4a485924f92e1128d3ea131af12a751b719f2136227d40f1388948253",
+    "add_external_covariate_sources": "d2881ad08fc89e7e4827fd8fea9e148aea2414a3e21dac571c9683bf8a40621e",
+    "add_external_feature_lags": "37c8a5374ad6b88480a7f021a7576c14f40bba43a5225d12cab3c20ec9fead85",
+    "central_model_params": "13903b31d3e1987750b29054a68868f64baa6c08d2a8d48feb73a77ab0a6a447",
+    "quantile_model_params": "35ee459efe35fa050a4c836c22976256905e3e39caf276d45c5792233c083267",
+    "stage1_model_params": "5ac3983a48560e099fdeabfe518d3aec5baecc975c39baedc9404aa1b5c023ca",
+    "spread_model_params": "2bcfdadbce9c16a884c2fc485857988bd480d3bd9c730142808147299274a72b",
+    "fit_lgbm_regressor": "15c564e2134c3e8f09ee1cbed8b23220ee2103869e3df8af4b14b7b2e439399a",
+    "make_oof_predictions": "7d224bd12f9696d13728fdab9c895a64c247b000838b4845341bd1d118d417db",
+    "ConditionalGaussianLogSigmaObjective": "50fddb63594cc2ef5d641b3a33a6460a8a3f58772bcade765eff9e8fa2a0ba3b",
+    "ConditionalGaussianScaleBooster": "cfb06eeb3365bc582e4f168ed7f530e6fcb69f3281d1d9475e62ebce903bb93e",
+    "fit_conditional_gaussian_scale_booster": "6f87a65cb559e019613fc797467d91bd206f6c3b27e4a87eb003b1868bcc3aaf",
+    "fit_production_lightgbmlss_one_bag": "cdcd5dc1ede39180b5e02a0fa49b9b4660f2766219209c114a1677a8124fa405",
+    "lightgbmlss_stage2_params": "6a6236eb0b9cf96707057fb28c4e668d61e551b576c63909a4b732ca62b9af77"
+  },
+  "joint_model_sha256": "043d9336eabda91431516bf354989aab57d8076f8c6f79ab597e832272025f21",
+  "study_config_sha256": "419d5f86786633222e399580d41ac1843621b471aea72359919cd8ecce5ec42e"
+}

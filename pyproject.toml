@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mighte-flusight"
+version = "2026.1.0"
+description = "Standalone prospective MIGHTE forecasts for CDC FluSight"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "numpy==1.26.4", "pandas==2.2.3", "scipy==1.14.1", "lightgbm==4.6.0",
+  "requests==2.32.4", "PyYAML==6.0.2", "jsonschema==4.26.0",
+  "plotly==6.3.0", "threadpoolctl==3.6.0"
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.4.2", "ruff==0.13.1"]
+
+[project.scripts]
+mighte = "mighte.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
