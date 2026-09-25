@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -5,7 +7,7 @@ import requests
 
 import mighte.evaluate as evaluation
 from mighte.contract import QUANTILES, HOSP
-from mighte.evaluate import BENCHMARKS, LOCAL_BASELINE, fetch_benchmarks, score_quantiles, summarize, wis
+from mighte.evaluate import BENCHMARKS, LOCAL_BASELINE, discover_benchmarks, fetch_benchmarks, score_quantiles, summarize, wis
 
 
 def test_wis_equals_weighted_interval_definition():
@@ -89,7 +91,7 @@ def test_displaying_comparators_for_preview_does_not_score_that_week(
     benchmarks = pd.concat([frame.assign(model_id=model) for frame in [forecast, preview]
                             for model in BENCHMARKS], ignore_index=True)
 
-    def fetch(root, references, *, online):
+    def fetch(root, references, *, online, catalog=None):
         assert set(references) == ({"2026-10-10", "2026-10-17"} if has_prospective_run else {"2026-10-17"})
         return benchmarks[benchmarks.reference_date.isin(references)], []
 
@@ -105,3 +107,80 @@ def test_displaying_comparators_for_preview_does_not_score_that_week(
         assert set(scores.model_id) == {"MIGHTE-Base", *BENCHMARKS}
     else:
         assert scores.empty
+
+
+def test_season_catalog_discovers_submissions_and_reuses_unchanged_listing(tmp_path, monkeypatch):
+    calls = []
+    tree = {"truncated": False, "tree": [
+        {"type": "blob", "path": "model-output/New-Model/2026-10-10-New-Model.csv", "sha": "new"},
+        {"type": "blob", "path": "model-output/Old-Model/2025-10-11-Old-Model.csv", "sha": "old"},
+        {"type": "blob", "path": "model-metadata/Registered-Only.yml", "sha": "metadata"},
+        {"type": "blob", "path": "model-output/New-Model/2026-10-10-Wrong-Name.csv", "sha": "invalid"}]}
+
+    def get(url, **kwargs):
+        calls.append(url)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps({"sha": "commit-a"} if url.endswith("commits/main") else tree).encode()
+        return response
+
+    monkeypatch.setattr(evaluation.requests, "get", get)
+    catalog, status = discover_benchmarks(tmp_path, ["2025-10-11", "2026-10-10", "2026-10-17"], season="2026-2027")
+    assert catalog["files"] == [{"model": "New-Model", "reference_date": "2026-10-10", "blob_sha": "new"}]
+    assert status["status"] == "refreshed"
+    same, status = discover_benchmarks(tmp_path, ["2026-10-10"], season="2026-2027")
+    assert same == catalog and status["status"] == "unchanged"
+    assert len(calls) == 3  # The second check only reads HEAD, not the whole tree.
+    offline, status = discover_benchmarks(tmp_path, ["2026-10-10"], season="2026-2027", online=False)
+    assert offline == catalog and status["status"] == "cached (offline)"
+    assert len(calls) == 3
+
+    def failed_refresh(*args, **kwargs):
+        raise requests.ConnectionError("offline")
+
+    monkeypatch.setattr(evaluation.requests, "get", failed_refresh)
+    cached, status = discover_benchmarks(tmp_path, ["2026-10-10"], season="2026-2027")
+    assert cached == catalog and status["status"] == "cached (refresh failed)"
+
+
+def test_truncated_model_catalog_is_not_treated_as_complete(tmp_path, monkeypatch):
+    def get(url, **kwargs):
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps({"sha": "commit-a", "tree": [], "truncated": True}).encode()
+        return response
+
+    monkeypatch.setattr(evaluation.requests, "get", get)
+    catalog, status = discover_benchmarks(tmp_path, ["2026-10-10"], season="2026-2027")
+    assert catalog is None
+    assert status["status"] == "unavailable" and "truncated" in status["reason"]
+    assert not (tmp_path / "data/benchmarks/catalog.json").exists()
+
+
+def test_dynamic_peer_downloads_only_published_changed_files(tmp_path, monkeypatch, forecast):
+    calls = []
+    values = forecast.copy()
+
+    def get(url, **kwargs):
+        calls.append(url)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = values.to_csv(index=False).encode()
+        return response
+
+    monkeypatch.setattr(evaluation.requests, "get", get)
+    catalog = {"revision": "commit-a", "files": [
+        {"model": "New-Model", "reference_date": "2026-10-10", "blob_sha": "blob-a"},
+        {"model": "MIGHTE-Base", "reference_date": "2026-10-10", "blob_sha": "our-model"}]}
+    first, _ = fetch_benchmarks(tmp_path, ["2026-10-10", "2026-10-17"], catalog=catalog)
+    assert set(first.model_id) == {"New-Model"}
+    assert len(calls) == 1 and "/commit-a/" in calls[0]
+    cached, _ = fetch_benchmarks(tmp_path, ["2026-10-10"], catalog=catalog)
+    pd.testing.assert_frame_equal(first, cached)
+    assert len(calls) == 1
+    catalog["revision"] = "commit-b"
+    catalog["files"][0]["blob_sha"] = "blob-b"
+    values = forecast.assign(value=forecast.value + 10)
+    revised, _ = fetch_benchmarks(tmp_path, ["2026-10-10"], catalog=catalog)
+    assert len(calls) == 2 and "/commit-b/" in calls[-1]
+    np.testing.assert_array_equal(revised.value, first.value + 10)

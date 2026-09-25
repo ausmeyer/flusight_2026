@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -9,13 +10,49 @@ import numpy as np
 import pandas as pd
 import requests
 
-from .contract import CATEGORIES, ED, HOSP, QUANTILES, TREND, UNIT, check_window, read_forecast
-from .data import HUB
+from .contract import CATEGORIES, ED, HOSP, MODELS, QUANTILES, TREND, UNIT, check_window, read_forecast
+from .data import API, HUB
 from .pipeline import verify_run
 from .util import digest, utc_now, write_json
 
 LOCAL_BASELINE = "Local-persistence"
 BENCHMARKS = ("FluSight-baseline", "FluSight-ensemble", "UMass-flusion", "Google_SAI-FluEns")
+
+
+def discover_benchmarks(root: Path, reference_dates, *, season: str, online=True):
+    """Discover actual season submissions, not merely registered model names."""
+    path = root / "data/benchmarks/catalog.json"
+    catalog = json.loads(path.read_text()) if path.exists() else None
+    status = {"model": "Season model catalog", "status": "cached (offline)" if catalog else "not cached"}
+    if online:
+        try:
+            response = requests.get(API + "commits/main", timeout=(15, 40))
+            response.raise_for_status()
+            revision = response.json()["sha"]
+            if catalog and catalog["revision"] == revision:
+                status["status"] = "unchanged"
+            else:
+                response = requests.get(API + f"git/trees/{revision}", params={"recursive": "1"}, timeout=(15, 40))
+                response.raise_for_status()
+                tree = response.json()
+                if tree.get("truncated"):
+                    raise ValueError("Hub model catalog is truncated; refusing a partial model list")
+                files = []
+                for entry in tree["tree"]:
+                    match = re.fullmatch(r"model-output/([A-Za-z0-9][A-Za-z0-9_.-]*)/(\d{4}-\d{2}-\d{2})-\1\.csv", entry["path"])
+                    if match and entry["type"] == "blob":
+                        files.append({"model": match[1], "reference_date": match[2], "blob_sha": entry["sha"]})
+                catalog = {"revision": revision, "retrieved_at": utc_now(), "files": files}
+                write_json(path, catalog)
+                status["status"] = "refreshed"
+        except (requests.RequestException, ValueError) as exc:
+            status.update(status="cached (refresh failed)" if catalog else "unavailable", reason=str(exc))
+    if catalog is None:
+        return None, status
+    start_year, end_year = season.split("-")
+    # The hub's allowed dates also contain previous seasons.
+    dates = {day for day in reference_dates if f"{start_year}-07-01" <= day < f"{end_year}-07-01"}
+    return {**catalog, "files": [f for f in catalog["files"] if f["reference_date"] in dates]}, status
 
 
 def prospective_runs(root: Path) -> list[Path]:
@@ -50,15 +87,28 @@ def load_archive(root: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def fetch_benchmarks(root: Path, references: list[str], *, online=True) -> tuple[pd.DataFrame, list[dict]]:
+def fetch_benchmarks(root: Path, references: list[str], *, online=True, catalog=None) -> tuple[pd.DataFrame, list[dict]]:
     frames, status = [], []
+    models = sorted(set(BENCHMARKS) | {f["model"] for f in catalog["files"]}) if catalog else BENCHMARKS
+    published = {(f["model"], f["reference_date"]): f["blob_sha"] for f in catalog["files"]} if catalog else {}
     for reference in sorted(set(references)):
-        for model in BENCHMARKS:
+        for model in models:
+            if model in MODELS:  # The immutable local runs are authoritative for our models.
+                continue
+            blob = published.get((model, reference))
+            if catalog is not None and blob is None:
+                status.append({"model": model, "reference_date": reference, "status": "not published"})
+                continue
             filename = f"{reference}-{model}.csv"
             path = root / "data/benchmarks" / model / filename
-            url = HUB + f"model-output/{model}/{filename}"
+            source_path = path.with_suffix(".source.json")
+            source = json.loads(source_path.read_text()) if source_path.exists() else {}
+            unchanged = bool(blob and blob == source.get("blob_sha") and path.exists()
+                             and digest(path) == source.get("sha256"))
+            base = HUB.removesuffix("main/") + catalog["revision"] + "/" if catalog else HUB
+            url = base + f"model-output/{model}/{filename}"
             try:
-                if online:
+                if online and not unchanged:
                     response = requests.get(url, timeout=(15, 40))
                     if response.status_code == 404:
                         status.append({"model": model, "reference_date": reference, "status": "not published"})
@@ -66,10 +116,11 @@ def fetch_benchmarks(root: Path, references: list[str], *, online=True) -> tuple
                     response.raise_for_status()
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes(response.content)
-                    write_json(path.with_suffix(".source.json"), {"url": url, "retrieved_at": utc_now(), "sha256": digest(path)})
+                    write_json(source_path, {"url": url, "retrieved_at": utc_now(),
+                                            "sha256": digest(path), "blob_sha": blob})
                     state = "refreshed"
                 elif path.exists():
-                    state = "cached (offline)"
+                    state = "unchanged" if online else "cached (offline)"
                 else:
                     status.append({"model": model, "reference_date": reference, "status": "not cached"})
                     continue
@@ -178,11 +229,11 @@ def summarize(scored: pd.DataFrame, *, baseline=LOCAL_BASELINE, location="states
     return pd.DataFrame(records)
 
 
-def evaluate(root: Path, snapshot: Path, *, online=True, comparison_references=()):
+def evaluate(root: Path, snapshot: Path, *, online=True, comparison_references=(), catalog=None):
     archive = load_archive(root)
     prospective = [] if archive.empty else archive.reference_date.unique().tolist()
     references = sorted(set(prospective) | set(comparison_references))
-    benchmarks, status = fetch_benchmarks(root, references, online=online)
+    benchmarks, status = fetch_benchmarks(root, references, online=online, catalog=catalog)
     scoring_archive = archive
     if not benchmarks.empty:
         # A peer forecast can be displayed for a rehearsal, but only genuine
