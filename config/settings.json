@@ -67,6 +67,10 @@
     "mode": "observed",
     "historical_nssp_file": null
   },
+  "ed_target_transform": {
+    "name": "logit",
+    "boundary_epsilon": 0.00005
+  },
   "ordinal_plugin": null,
   "threads": 4,
   "component_workers": 2

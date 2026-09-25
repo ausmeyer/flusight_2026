@@ -2,7 +2,7 @@ team_name: MIGHTE
 team_abbr: MIGHTE
 model_name: Distributional LightGBM
 model_abbr: Base
-model_version: '1.0'
+model_version: '1.1'
 model_contributors:
 - name: Austin Meyer
   affiliation: Baylor College of Medicine
@@ -18,13 +18,14 @@ data_inputs: Weekly NHSN influenza hospital admissions; historical ILINet/FluSur
   proxies; seasonality. National WastewaterSCAN influenza A and NSSP influenza ED surveillance.
 methods: Pooled two-stage LightGBM for forecast median and spread, using target history, seasonality
   and national wastewater; hospitalization forecasts also use national NSSP ED signals.
-methods_long: A pooled two-stage distributional LightGBM model fits log-scale changes using target
+methods_long: A pooled two-stage distributional LightGBM model fits log1p hospitalization changes using target
   history, seasonal features and national WastewaterSCAN influenza A with recent lags. The hospitalization
   model also uses national NSSP influenza ED level and recent lags. The first stage estimates the
   conditional center and the second estimates Gaussian spread by conditional negative log-likelihood
   using rolling out-of-fold center predictions. States share a fit with location indicators and national
-  hospitalization summaries. An analogous separately fitted ED model uses ED history and wastewater;
-  forecasts are converted to proportions. No peak targets are submitted.
+  target-history summaries. A separately fitted ED model uses ED history and wastewater to model changes
+  in log-odds of the ED proportion, with a fixed boundary for rounded zeros. Its inverse-logit quantiles
+  are exported as proportions. No peak targets are submitted.
 ensemble_of_models: false
 ensemble_of_hub_models: false
 backfill_adjustment: Complete observed histories are refreshed before every weekly fit using current

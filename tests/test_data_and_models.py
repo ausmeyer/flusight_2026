@@ -4,6 +4,7 @@ import shutil
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.special import expit
 
 from mighte import core
 from mighte.contract import ED, HOSP
@@ -11,6 +12,8 @@ from mighte.data import (API, Downloader, choose_truth, clean_truth, wastewater_
                          reconstruct_ed, hospitalization_history, attach_ed_fraction)
 from mighte.models import equal_quantiles
 from mighte.panel_ar import PanelARRuntime, prepare_panel_ar_table
+
+ED_TRANSFORM = {"name": "logit", "boundary_epsilon": .00005}
 
 
 def test_backfill_replaces_prior_values_including_new_suppression():
@@ -118,32 +121,34 @@ def test_fixed_thirds_and_missing_component(forecast):
 def test_ed_proxy_shift_is_explicit(root):
     ili = pd.read_csv(root / "data/historical/ilinet_normalized.csv", parse_dates=["date"])
     obs = ili[(ili.location_name == "US") & ili.date.ge("2022-10-01")].copy()
-    obs["total_hosp"] = np.expm1(.8 + .1 * obs.ili)
-    result, audit = reconstruct_ed(root, obs[["date", "location_name", "total_hosp"]], {"mode": "post2022_proxy"})
-    assert audit["coefficients"] == pytest.approx([.8, .1])
+    obs["total_hosp"] = 100 * expit(-5 + .1 * obs.ili)
+    result, audit = reconstruct_ed(root, obs[["date", "location_name", "total_hosp"]],
+                                   {"mode": "post2022_proxy"}, ED_TRANSFORM)
+    assert audit["coefficients"] == pytest.approx([-5, .1])
+    assert audit["response_transform"] == ED_TRANSFORM
     assert audit["shift_days"] == 728
     expected = ili.loc[(ili.location_name == "US") & ili.date.le("2019-06-30"), "date"].min() + pd.Timedelta(days=728)
     assert result.date.min() == expected
     with pytest.raises(ValueError, match="historical_nssp_file"):
-        reconstruct_ed(root, obs, {"mode": "prepandemic_proxy"})
+        reconstruct_ed(root, obs, {"mode": "prepandemic_proxy"}, ED_TRANSFORM)
 
 
 def test_supplied_prepandemic_ed_mapping(root, tmp_path):
     shutil.copytree(root / "data/historical", tmp_path / "data/historical")
     ili = pd.read_csv(root / "data/historical/ilinet_normalized.csv", parse_dates=["date"])
     national = ili[ili.location_name.eq("US") & ili.date.lt("2020-03-01")].copy()
-    national["value"] = np.expm1(.8 + .1 * national.ili) / 100
+    national["value"] = expit(-5 + .1 * national.ili)
     national[["date", "value"]].to_csv(tmp_path / "data/historical/nssp.csv", index=False)
     observed = pd.DataFrame({"location_name": ["US"], "date": pd.to_datetime(["2026-09-19"]), "total_hosp": [.5]})
     settings = {"mode": "prepandemic_proxy", "historical_nssp_file": "data/historical/nssp.csv"}
-    result, audit = reconstruct_ed(tmp_path, observed, settings)
-    assert audit["coefficients"] == pytest.approx([.8, .1])
+    result, audit = reconstruct_ed(tmp_path, observed, settings, ED_TRANSFORM)
+    assert audit["coefficients"] == pytest.approx([-5, .1])
     assert result.loc[result.date.eq("2026-09-19"), "total_hosp"].item() == .5
     assert not result.date.between("2021-06-27", "2026-09-18").any()
     pd.concat([national[["date", "value"]], national[["date", "value"]].iloc[:1]]).to_csv(
         tmp_path / "data/historical/nssp.csv", index=False)
     with pytest.raises(ValueError, match="one observation"):
-        reconstruct_ed(tmp_path, observed, settings)
+        reconstruct_ed(tmp_path, observed, settings, ED_TRANSFORM)
 
 
 def test_ed_fraction_carries_forward_without_leading_extrapolation():

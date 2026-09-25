@@ -11,9 +11,11 @@ import numpy as np
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
+from scipy.special import expit
 from urllib3.util.retry import Retry
 
 from .contract import Contract, HOSP, ED
+from .ed_transform import boundary_epsilon, ed_logit
 from .util import digest, utc_now, write_json
 
 HUB = "https://raw.githubusercontent.com/cdcepi/FluSight-forecast-hub/main/"
@@ -291,7 +293,8 @@ def hospitalization_history(root: Path, snapshot: Path, observed: pd.DataFrame, 
         "calibration_predictor_end": proxy.date.max().date().isoformat(), "locations": shift_table.to_dict("records")}
 
 
-def reconstruct_ed(root: Path, observed: pd.DataFrame, settings: dict) -> tuple[pd.DataFrame, dict]:
+def reconstruct_ed(root: Path, observed: pd.DataFrame, settings: dict, transform: dict) -> tuple[pd.DataFrame, dict]:
+    epsilon = boundary_epsilon(transform)
     mode = settings["mode"]
     if mode == "observed":
         return observed, {"mode": mode, "proxy_rows": 0}
@@ -319,20 +322,21 @@ def reconstruct_ed(root: Path, observed: pd.DataFrame, settings: dict) -> tuple[
     if len(paired) < 52 or paired.ili.std() < 1e-8:
         raise ValueError("At least 52 paired weeks with varying ILINet are required for ED reconstruction")
     design = np.column_stack([np.ones(len(paired)), paired.ili])
-    coefficients = np.linalg.lstsq(design, np.log1p(paired.total_hosp), rcond=None)[0]
+    coefficients = np.linalg.lstsq(design, ed_logit(paired.total_hosp / 100, epsilon), rcond=None)[0]
     # Use the same source-history cutoff and 728-day shift as hospitalization.
     proxy = ili[ili.date.le("2019-06-30")].copy()
-    proxy["total_hosp"] = np.clip(np.expm1(coefficients[0] + coefficients[1] * proxy.ili), 0, 100)
+    proxy["total_hosp"] = 100 * expit(coefficients[0] + coefficients[1] * proxy.ili)
     proxy["date"] += pd.Timedelta(days=728)
     proxy = proxy[proxy.location_name.isin(observed.location_name.unique())]
     proxy = proxy[["location_name", "date", "total_hosp"]]
     merged = pd.concat([proxy, observed]).drop_duplicates(["location_name", "date"], keep="last")
     return merged, {"mode": mode, "proxy_rows": len(proxy), "mapping_weeks": len(paired),
-                     "coefficients": coefficients.tolist(), "shift_days": 728,
+                     "coefficients": coefficients.tolist(), "shift_days": 728, "response_transform": transform,
                      "note": "Training proxy only. The post2022 option assumes the national ILI-to-ED relationship transfers across eras and locations."}
 
 
 def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -> tuple[dict, dict]:
+    epsilon = boundary_epsilon(settings["ed_target_transform"])
     anchor = pd.Timestamp(reference) - pd.Timedelta(weeks=1)
     contract = Contract(snapshot / "contract")
     names = contract.locations.set_index("location").location_name.to_dict()
@@ -356,10 +360,17 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
             model, n_filled, adjustment = hospitalization_history(root, snapshot, model, anchor)
             audit["hospitalization_adjustment"] = adjustment
         else:
-            model["total_hosp"] *= 100  # model in percentage points; submit in proportions
-            model, reconstruction = reconstruct_ed(root, model, settings["ed_history"])
+            model["total_hosp"] *= 100  # predictors in percentage points; response link uses proportions
+            model, reconstruction = reconstruct_ed(root, model, settings["ed_history"], settings["ed_target_transform"])
             audit["ed_reconstruction"] = reconstruction
             model, n_filled = weekly_grid(model, anchor)
+            proportions = model.total_hosp / 100
+            ed_logit(proportions.dropna(), epsilon)
+            boundary = (proportions < epsilon) | (proportions > 1 - epsilon)
+            audit["ed_target_transform"] = {**settings["ed_target_transform"],
+                "boundary_training_observations": int(boundary.sum()),
+                "boundary_anchor_observations": int((boundary & model.date.eq(anchor)).sum()),
+                "boundary_policy": "Clip response-link inputs only; do not alter truth or predictor history"}
         inputs[target] = model
         audit[target] = {"anchor": anchor.date().isoformat(), "locations": sorted(eligible),
                           "excluded_locations": sorted(allowed - eligible), "training_rows": len(model),

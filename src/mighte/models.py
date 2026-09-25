@@ -6,11 +6,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.special import expit
 from scipy.stats import norm
 
 from . import core
 from .contract import COLUMNS, ED, HOSP, QUANTILES, UNIT
 from .data import NSSP, WW
+from .ed_transform import boundary_epsilon, ed_logit
 from .panel_ar import PanelARRuntime, PanelARSpec, forecast_panel_ar_anchor, prepare_panel_ar_table
 from .util import write_json
 
@@ -48,7 +50,16 @@ def distributional(history: pd.DataFrame, snapshot: Path, reference: str, settin
     test = pooled[pooled.date.eq(anchor)].reset_index(drop=True)
     if len(train) < runtime.min_train_rows or test.empty or test.total_hosp.isna().any():
         raise ValueError(f"Insufficient training data or missing forecast anchor: {component}")
-    y = np.log1p(train.target.to_numpy()) - np.log1p(train.total_hosp.to_numpy())
+    transform = None
+    if target == ED:
+        epsilon = boundary_epsilon(settings["ed_target_transform"])
+        transform = {"name": "logit", "boundary_epsilon": epsilon,
+                     "input_unit": "percentage points", "checkpoint_unit": "percentage points"}
+        y = ed_logit(train.target.to_numpy() / 100, epsilon) - ed_logit(train.total_hosp.to_numpy() / 100, epsilon)
+        anchor_link = ed_logit(test.total_hosp.to_numpy() / 100, epsilon)
+    else:
+        y = np.log1p(train.target.to_numpy()) - np.log1p(train.total_hosp.to_numpy())
+        anchor_link = np.log1p(test.total_hosp.to_numpy())
     seasons = sorted(train.season.unique())
     bag_size = max(1, int(round(len(seasons) * runtime.bag_frac)))
     seed = int(settings["seed"])
@@ -56,6 +67,15 @@ def distributional(history: pd.DataFrame, snapshot: Path, reference: str, settin
     predictions = []
     audit = []
     checkpoint.mkdir(parents=True, exist_ok=True)
+    if transform is not None:
+        transform_path = checkpoint / "response-transform.json"
+        if transform_path.exists():
+            if json.loads(transform_path.read_text()) != transform:
+                raise ValueError("ED checkpoint transformation changed; use a new checkpoint directory")
+        elif any(checkpoint.glob("bag-*.npy")):
+            raise ValueError("ED checkpoints lack response transformation metadata; use a new checkpoint directory")
+        else:
+            write_json(transform_path, transform)
     for bag in range(runtime.num_bags):
         sampled = rng.choice(seasons, size=bag_size, replace=False)
         path = checkpoint / f"bag-{bag:03d}.npy"
@@ -76,18 +96,20 @@ def distributional(history: pd.DataFrame, snapshot: Path, reference: str, settin
             x = test[columns].astype(float)
             mu, sigma = center.predict(x), scale.predict_sigma(x)
             q_log = norm.ppf(QUANTILES[None, :], loc=mu[:, None], scale=sigma[:, None])
-            q_log += np.log1p(test.total_hosp.to_numpy())[:, None]
-            quantiles = np.maximum(np.expm1(q_log), 0)
+            q_log += anchor_link[:, None]
+            quantiles = 100 * expit(q_log) if target == ED else np.maximum(np.expm1(q_log), 0)
             with path.with_suffix(".tmp").open("wb") as handle:
                 np.save(handle, quantiles, allow_pickle=False)
             path.with_suffix(".tmp").replace(path)
         if quantiles.shape != (len(test), len(QUANTILES)) or not np.isfinite(quantiles).all():
             raise ValueError(f"Invalid prediction/checkpoint in {component} bag {bag}")
+        if target == ED and (np.any((quantiles < 0) | (quantiles > 100)) or np.any(np.diff(quantiles, axis=1) < 0)):
+            raise ValueError(f"Unordered or out-of-bounds ED quantiles in bag {bag}")
         predictions.append(quantiles)
     # Preserve the study's pointwise median across season-subsampled fits.
     values = np.median(np.stack(predictions), axis=0)
     if target == ED:
-        values = np.clip(values / 100, 0, 1)
+        values = values / 100
     records = []
     for row, vector in zip(test.itertuples(index=False), values):
         for q, value in zip(QUANTILES, vector):
@@ -99,7 +121,8 @@ def distributional(history: pd.DataFrame, snapshot: Path, reference: str, settin
     write_json(checkpoint / "fit.json", {"component": component, "bags": len(predictions),
                                         "training_rows": len(train), "features": columns,
                                         "seed": seed, "signals": list(signals),
-                                        "aggregation": "pointwise median of bag quantiles"})
+                                        "aggregation": "pointwise median of bag quantiles",
+                                        "response_transform": transform or {"name": "log1p"}})
     return pd.DataFrame(records, columns=COLUMNS)
 
 
