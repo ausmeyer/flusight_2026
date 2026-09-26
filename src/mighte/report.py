@@ -99,9 +99,10 @@ body{margin:0}main{max-width:1450px;margin:auto;padding:28px 32px 50px}h1{font-s
 .head{display:flex;justify-content:space-between;gap:18px;align-items:center}.badge{padding:8px 14px;border-radius:20px;background:#d6ede7;color:#215949;font-size:12px;font-weight:750}
 .preview{background:#fff1cf;color:#805908}.card{margin-top:22px;border:1px solid #dce4e8;border-radius:13px;background:white;padding:22px;box-shadow:0 2px 3px #19333e04}
 h2{font-size:18px;margin:0 0 15px}.controls{display:flex;gap:16px;align-items:end;flex-wrap:wrap}label{font-size:12px;font-weight:650;display:flex;flex-direction:column;gap:7px}
-select{font:inherit;min-width:160px;border:1px solid #c5d2d9;border-radius:6px;padding:8px;background:white;color:#213f50}
+select{font:inherit;min-width:160px;border:1px solid #c5d2d9;border-radius:6px;padding:8px 30px 8px 12px;appearance:none;color:#213f50;
+background:white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23213f50' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center}
 .model-control{font-size:12px;font-weight:650;display:flex;flex-direction:column;gap:7px}.model-picker{position:relative;margin:0;min-width:190px}
-.model-picker summary{border:1px solid #c5d2d9;border-radius:6px;padding:8px;background:white;color:#213f50;font-size:12px}
+.model-picker summary{border:1px solid #c5d2d9;border-radius:6px;padding:8px 12px;background:white;color:#213f50;font-size:12px}
 .model-panel{position:absolute;z-index:20;right:0;top:calc(100% + 7px);width:min(320px,calc(100vw - 48px));box-sizing:border-box;background:white;border:1px solid #c5d2d9;border-radius:8px;padding:12px;box-shadow:0 8px 24px #19333e24}
 .model-search{box-sizing:border-box;width:100%;padding:8px;border:1px solid #c5d2d9;border-radius:5px;font:inherit}.model-actions{display:flex;gap:8px;margin:10px 0}
 .model-actions button{font:inherit;color:#216b75;border:1px solid #c5d2d9;border-radius:5px;background:white;padding:5px 9px;cursor:pointer}
