@@ -10,23 +10,16 @@ model_contributors:
 - name: Mauricio Santillana
   affiliation: Northeastern University
   email: m.santillana@northeastern.edu
-website_url: https://github.com/ausmeyer/flusight_2026
+website_url: https://www.meyerlab.io/flusight_2026/
 repo_url: https://github.com/ausmeyer/flusight_2026
 license: CC-BY-4.0
 designated_model: true
-data_inputs: Weekly NHSN influenza hospital admissions; historical ILINet/FluSurv-derived hospitalization
-  proxies; seasonality. National WastewaterSCAN influenza A and NSSP influenza ED surveillance.
-methods: Fixed equal-weight quantile average of wastewater-only and NSSP-only two-stage distributional
-  LightGBM hospitalization models and partially pooled distributional autoregression.
-methods_long: 'For 2026–27, MIGHTE-Nsemble is a fixed equal-weight average of forecast quantiles
-  from three hospitalization models: a pooled two-stage distributional LightGBM with national WastewaterSCAN
-  influenza A level and recent lags; the same model using national NSSP influenza ED level and recent
-  lags; and MIGHTE-Linear, a partially pooled distributional autoregression. Each component receives
-  one-third weight. Weights do not change with recent forecast performance. This replaces the previous
-  adaptive ensemble. MIGHTE-Linear is separately submitted to this hub; the other component forecasts
-  are internal.'
+data_inputs: NHSN hospital admissions, national WastewaterSCAN influenza A, national NSSP influenza
+  ED visits, and historical ILINet/FluSurv-NET data.
+methods: Fixed equal-weight quantile ensemble of two-stage LightGBM bases and MIGHTE-Linear.
+methods_long: For 2026–27, fixed weights replace adaptive weighting. Components estimate predictive
+  uncertainty and share information across locations without explicit spatial covariance.
+  Components include MIGHTE-Linear.
 ensemble_of_models: true
 ensemble_of_hub_models: true
-backfill_adjustment: Complete observed histories are refreshed before every weekly fit using current
-  hub and CDC releases. Revised observations replace earlier values; no blanket nowcast inflation
-  is applied. Forecasts and input snapshots remain frozen.
+backfill_adjustment: Models are refit weekly using the latest revised observations.

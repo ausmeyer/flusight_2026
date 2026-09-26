@@ -10,24 +10,17 @@ model_contributors:
 - name: Mauricio Santillana
   affiliation: Northeastern University
   email: m.santillana@northeastern.edu
-website_url: https://github.com/ausmeyer/flusight_2026
+website_url: https://www.meyerlab.io/flusight_2026/
 repo_url: https://github.com/ausmeyer/flusight_2026
 license: CC-BY-4.0
 designated_model: true
-data_inputs: Weekly NHSN influenza hospital admissions; historical ILINet/FluSurv-derived hospitalization
-  proxies; seasonality. National WastewaterSCAN influenza A and NSSP influenza ED surveillance.
-methods: Pooled two-stage LightGBM for forecast median and spread, using target history, seasonality
-  and national wastewater; hospitalization forecasts also use national NSSP ED signals.
-methods_long: A pooled two-stage distributional LightGBM model fits log1p hospitalization changes using target
-  history, seasonal features and national WastewaterSCAN influenza A with recent lags. The hospitalization
-  model also uses national NSSP influenza ED level and recent lags. The first stage estimates the
-  conditional center and the second estimates Gaussian spread by conditional negative log-likelihood
-  using rolling out-of-fold center predictions. States share a fit with location indicators and national
-  target-history summaries. A separately fitted ED model uses ED history and wastewater to model changes
-  in log-odds of the ED proportion, with a fixed boundary for rounded zeros. Its inverse-logit quantiles
-  are exported as proportions. No peak targets are submitted.
+data_inputs: NHSN hospital admissions, NSSP influenza ED visits, national WastewaterSCAN influenza A,
+  and historical ILINet/FluSurv-NET data.
+methods: Two-stage LightGBM estimates forecast median and spread using surveillance history,
+  seasonality, wastewater and emergency-department signals.
+methods_long: Separate pooled fits forecast hospitalizations and ED proportions, with Gaussian
+  uncertainty on transformed scales. Models share information across locations without explicit
+  spatial covariance.
 ensemble_of_models: false
 ensemble_of_hub_models: false
-backfill_adjustment: Complete observed histories are refreshed before every weekly fit using current
-  hub and CDC releases. Revised observations replace earlier values; no blanket nowcast inflation
-  is applied. Forecasts and input snapshots remain frozen.
+backfill_adjustment: Models are refit weekly using the latest revised observations.

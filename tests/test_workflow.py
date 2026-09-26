@@ -157,3 +157,33 @@ def test_registration_cancellation_makes_no_github_request(root, monkeypatch, ca
     monkeypatch.setattr(cli, "register", lambda root: pytest.fail("Registration was not approved"))
     cli.main()
     assert "Registration cancelled" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("joint_designated", [False, True])
+def test_registration_includes_joint_retirement_and_enforces_two_designated(root, tmp_path, monkeypatch, joint_designated):
+    from mighte import submit as submission
+    from mighte.contract import Contract
+
+    shutil.copytree(root / "model-metadata", tmp_path / "model-metadata")
+    (tmp_path / "docs").mkdir()
+    shutil.copyfile(root / "docs/REGISTRATION_PR.md", tmp_path / "docs/REGISTRATION_PR.md")
+    joint = tmp_path / "model-metadata/MIGHTE-Joint.yml"
+    if joint_designated:
+        joint.write_text(joint.read_text().replace("designated_model: false", "designated_model: true"))
+    monkeypatch.setattr(submission, "fresh_contract", lambda _: Contract(root / "hub-contract"))
+    calls = []
+
+    def capture_pr(project, files, **kwargs):
+        calls.append(files)
+        return "reviewed-metadata-pr"
+
+    monkeypatch.setattr(submission, "create_pr", capture_pr)
+    if joint_designated:
+        with pytest.raises(ValueError, match="More than two designated"):
+            submission.register(tmp_path)
+        assert calls == []
+    else:
+        assert submission.register(tmp_path) == "reviewed-metadata-pr"
+        assert len(calls) == 1
+        assert set(calls[0]) == {"model-metadata/MIGHTE-Base.yml", "model-metadata/MIGHTE-Linear.yml",
+                                 "model-metadata/MIGHTE-Nsemble.yml", "model-metadata/MIGHTE-Joint.yml"}

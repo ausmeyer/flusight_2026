@@ -13,7 +13,7 @@ from .data import refresh, latest_snapshot
 from .pipeline import latest_run, run_forecasts, verify_run
 from .publish import prepare_publication, publish_report, repository
 from .report import build_report
-from .submit import register, submit
+from .submit import REGISTRATION_MODELS, register, submit
 from .util import project_root
 
 
@@ -55,15 +55,15 @@ def main():
             refresh(root)
             return
         if args.command == "check":
-            Contract(root / "hub-contract").validate_metadata(root / "model-metadata")
+            Contract(root / "hub-contract").validate_metadata(root / "model-metadata", models=REGISTRATION_MODELS)
             from .pipeline import environment
             print(json.dumps(environment(), indent=2))
             print("Metadata and standalone imports OK")
             return
         if args.command == "register":
-            Contract(root / "hub-contract").validate_metadata(root / "model-metadata")
+            Contract(root / "hub-contract").validate_metadata(root / "model-metadata", models=REGISTRATION_MODELS)
             print((root / "docs/REGISTRATION_PR.md").read_text())
-            print("Files: model-metadata/MIGHTE-{Base,Linear,Nsemble}.yml")
+            print("Files: " + ", ".join(f"model-metadata/{model}.yml" for model in REGISTRATION_MODELS))
             if not args.yes and input("Type register to open the CDC metadata pull request: ").strip() != "register":
                 print("Registration cancelled.")
                 return

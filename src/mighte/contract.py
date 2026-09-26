@@ -119,10 +119,10 @@ class Contract:
         return {"rows": len(df), "targets": sorted(df.target.unique()),
                 "locations": df.groupby("target").location.nunique().to_dict(), "valid": True}
 
-    def validate_metadata(self, directory: Path) -> list[dict]:
+    def validate_metadata(self, directory: Path, *, models=MODELS) -> list[dict]:
         schema = json.loads((self.directory / "model-metadata-schema.json").read_text())
         records = []
-        for model in MODELS:
+        for model in models:
             data = yaml.safe_load((directory / f"{model}.yml").read_text())
             jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(data)
             if f"{data['team_abbr']}-{data['model_abbr']}" != model:
