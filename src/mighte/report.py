@@ -9,9 +9,9 @@ from pathlib import Path
 import pandas as pd
 from plotly.offline import get_plotlyjs
 
-from .contract import HOSP, MODELS, UNIT, Contract, read_forecast
+from .contract import HOSP, UNIT, Contract, read_forecast
 from .data import latest_snapshot, verify_snapshot
-from .evaluate import BENCHMARKS, LOCAL_BASELINE, discover_benchmarks, evaluate, summarize
+from .evaluate import LOCAL_BASELINE, discover_benchmarks, evaluate, summarize
 from .pipeline import verify_run
 from .util import digest, utc_now, write_json
 
@@ -40,7 +40,7 @@ def build_report(root: Path, run: Path, *, online=True) -> Path:
     season_references = Contract(snapshot / "contract").by_target[HOSP]["task_ids"]["reference_date"]["optional"]
     catalog, catalog_status = discover_benchmarks(root, season_references,
                                                  season=manifest["settings"]["season"], online=online)
-    comparison_models = sorted(set(BENCHMARKS) | ({f["model"] for f in catalog["files"]} if catalog else set()))
+    comparison_models = sorted({f["model"] for f in catalog["files"]} if catalog else [])
     scores, benchmark_status, archive = evaluate(root, snapshot, online=online,
                                                 comparison_references=[manifest["reference_date"]], catalog=catalog)
     current = pd.concat([read_forecast(run / filename).assign(model_id=Path(filename).parent.name)
@@ -65,7 +65,7 @@ def build_report(root: Path, run: Path, *, online=True) -> Path:
                "locations": records(locations[["location", "location_name"]]),
                "benchmarks": [catalog_status, *benchmark_status],
                "comparison_models": comparison_models, "baseline_models": [LOCAL_BASELINE, *comparison_models],
-               "default_models": list(MODELS),
+               "default_models": ["MIGHTE-Base"],
                "model_colors": {m: model_color(m) for m in set(forecasts.model_id) | set(comparison_models)}}
     output = root / "reports" / manifest["run_id"]
     output.mkdir(parents=True, exist_ok=True)
@@ -113,7 +113,7 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 <section class="card"><h2>Prospective forecasts</h2><div class="controls">
 <label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">Influenza ED visits</option></select></label>
 <label>Location<select id="location"></select></label>
-<div class="model-control"><span>Models</span><details id="model-picker" class="model-picker"><summary id="model-summary" aria-label="Models">3 selected</summary>
+<div class="model-control"><span>Models</span><details id="model-picker" class="model-picker"><summary id="model-summary" aria-label="Models">1 selected</summary>
 <div class="model-panel"><input id="model-search" class="model-search" type="search" aria-label="Search models" placeholder="Search models">
 <div class="model-actions"><button id="select-all" type="button">Select all</button><button id="clear-models" type="button">Clear</button></div>
 <div id="models" class="checks" role="group" aria-label="Forecast models"></div><div id="no-model-matches" hidden>No matching models.</div></div>
