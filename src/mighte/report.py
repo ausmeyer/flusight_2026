@@ -96,8 +96,8 @@ TEMPLATE = r'''<!doctype html>
 :root{font-family:system-ui,-apple-system,sans-serif;color:#1b3040;background:#f2f5f6}
 body{margin:0}main{max-width:1450px;margin:auto;padding:28px 32px 50px}h1{font-size:30px;letter-spacing:-1px;margin:4px 0}
 .eyebrow{color:#367b80;font-size:12px;font-weight:750;letter-spacing:2px}.muted{color:#5b6f7c;font-size:13px;line-height:1.65}
-.head{display:flex;justify-content:space-between;gap:18px;align-items:center}.badge{padding:8px 14px;border-radius:20px;background:#d6ede7;color:#215949;font-size:12px;font-weight:750}
-.preview{background:#fff1cf;color:#805908}.card{margin-top:22px;border:1px solid #dce4e8;border-radius:13px;background:white;padding:22px;box-shadow:0 2px 3px #19333e04}
+.head{display:flex;justify-content:space-between;gap:18px;align-items:center}
+.card{margin-top:22px;border:1px solid #dce4e8;border-radius:13px;background:white;padding:22px;box-shadow:0 2px 3px #19333e04}
 h2{font-size:18px;margin:0 0 15px}.controls{display:flex;gap:16px;align-items:end;flex-wrap:wrap}label{font-size:12px;font-weight:650;display:flex;flex-direction:column;gap:7px}
 select{font:inherit;min-width:160px;border:1px solid #c5d2d9;border-radius:6px;padding:8px 30px 8px 12px;appearance:none;color:#213f50;
 background:white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23213f50' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center}
@@ -115,9 +115,9 @@ th{text-align:right;padding:11px 10px;background:#f0f5f7;color:#46606e;font-size
 .positive{color:#157267}.negative{color:#a24141}.empty{padding:30px;text-align:center;color:#6f808a}
 details{margin-top:14px;font-size:13px}summary{cursor:pointer;color:#396575}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f7f8;padding:16px;max-height:400px;overflow:auto;font-size:11px}
 details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;right:auto}}
-@media(max-width:720px){main{padding:18px 12px}.card{padding:13px}.head{display:block}.badge{display:inline-block;margin-top:12px}#chart{height:350px}.timeline{gap:12px}.timeline select{min-width:125px}}
+@media(max-width:720px){main{padding:18px 12px}.card{padding:13px}.head{display:block}#chart{height:350px}.timeline{gap:12px}.timeline select{min-width:125px}}
 </style></head><body><main>
-<div class="head"><div><div class="eyebrow">MIGHTE / FLUSIGHT 2026–27</div><h1>Weekly forecast review</h1></div><span id="status" class="badge"></span></div>
+<div class="head"><div><div class="eyebrow">MIGHTE / FLUSIGHT 2026–27</div><h1>Weekly forecast review</h1></div></div>
 <section class="card"><h2>Prospective forecasts</h2><div class="controls">
 <label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">Influenza ED visits</option><option value="wk flu hosp rate change">Hospitalization trend</option></select></label>
 <label>Location<select id="location"></select></label>
@@ -144,8 +144,6 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 const D=__DATA__;
 const el=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const options=(id,items)=>{el(id).innerHTML=items.map(([v,t])=>`<option value="${esc(v)}">${esc(t)}</option>`).join('')};
-el('status').textContent=D.manifest.preview?'PREVIEW · CANNOT SUBMIT':'VALIDATED · READY FOR REVIEW';
-el('status').classList.toggle('preview',D.manifest.preview);
 const TREND='wk flu hosp rate change',allForecasts=[...D.forecasts,...D.categorical_forecasts];
 const references=[...new Set(allForecasts.map(r=>r.reference_date))].sort();
 const seasonYear=Number(D.manifest.settings.season.split('-')[0]);
