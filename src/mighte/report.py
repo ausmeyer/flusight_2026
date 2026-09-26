@@ -168,8 +168,7 @@ traces.push({type:'heatmap',x:values.map(r=>r.target_end_date),y:D.categories.ma
 xaxis:'x'+suffix,yaxis:'y'+suffix,zmin:0,zmax:1,colorscale:[[0,'#f4f7f8'],[1,c]],showscale:false,xgap:4,ygap:4,texttemplate:'%{z:.1%}',textfont:{size:13},
 hovertemplate:`${esc(model.replace(/^MIGHTE-/,''))} · %{x}<br>%{y}: %{z:.1%}<extra></extra>`});
 layout['xaxis'+suffix]={type:'category',anchor:'y'+suffix,tickmode:'array',tickvals:values.map(r=>r.target_end_date),ticktext:values.map(r=>`${r.target_end_date}<br>Horizon ${r.horizon}`),showgrid:false};
-layout['yaxis'+suffix]={type:'category',domain,anchor:'x'+suffix,showgrid:false,ticks:''};
-layout.annotations.push({text:esc(model),xref:'paper',yref:'paper',x:0,y:domain[1],yshift:12,xanchor:'left',showarrow:false,font:{color:c,size:14}})});
+layout['yaxis'+suffix]={type:'category',domain,anchor:'x'+suffix,showgrid:false,ticks:''};});
 if(!models.length)layout.annotations.push({text:'No selected forecasts for this week and location.',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false});
 el('chart').style.height=Math.max(400,n*260)+'px';Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false});
 }
