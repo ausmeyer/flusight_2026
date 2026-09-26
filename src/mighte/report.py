@@ -121,7 +121,7 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 </details></div></div>
 <div class="timeline"><div class="week-navigation"><label for="week-slider">Browse forecast weeks</label><div class="week-slider">
 <button id="previous-week" type="button" aria-label="Previous forecast week">‹</button><input id="week-slider" type="range" min="0" step="1"><button id="next-week" type="button" aria-label="Next forecast week">›</button>
-</div></div><label>Ground-truth history<select id="history"><option value="recent">Recent</option><option value="year">Past year</option><option value="all">All available</option></select></label></div>
+</div></div><label>Ground-truth history<select id="history"><option value="recent">Recent</option><option value="year">Past year</option><option value="two_years">Past two years</option><option value="all">All available</option></select></label></div>
 <div id="chart"></div>
 </section>
 <section class="card"><h2>Prospective accuracy to date</h2><div class="controls">
@@ -140,6 +140,7 @@ const options=(id,items)=>{el(id).innerHTML=items.map(([v,t])=>`<option value="$
 el('status').textContent=D.manifest.preview?'PREVIEW · CANNOT SUBMIT':'VALIDATED · READY FOR REVIEW';
 el('status').classList.toggle('preview',D.manifest.preview);
 const references=[...new Set(D.forecasts.map(r=>r.reference_date))].sort();
+const seasonYear=Number(D.manifest.settings.season.split('-')[0]);
 options('reference',[...references].reverse().map(x=>[x,x]));el('reference').value=D.manifest.reference_date;
 el('week-slider').max=references.length-1;el('week-slider').disabled=references.length<2;
 options('location',D.locations.filter(x=>D.forecasts.some(r=>r.location===x.location)).sort((a,b)=>(b.location==='US')-(a.location==='US')||a.location_name.localeCompare(b.location_name)).map(x=>[x.location,x.location_name]));el('location').value='US';
@@ -159,7 +160,7 @@ el('model-summary').textContent=`${selectedCount} selected`;el('model-summary').
 const traces=[],chosen=selectedModels();
 const observed=D.truth.filter(r=>r.target===target&&r.location===loc&&r.value!==null).sort((a,b)=>a.date.localeCompare(b.date));
 const latest=references[references.length-1],history=el('history').value;
-const start=history==='all'?(observed[0]?.date||references[0]):shiftDate(latest,history==='year'?-365:-120);
+const start=history==='all'?(observed[0]?.date||references[0]):`${seasonYear-({recent:0,year:1,two_years:2}[history])}-07-01`;
 // Include every saved forecast week and hold the view fixed while moving between them.
 const begin=[start,shiftDate(references[0],-7)].sort()[0],end=[shiftDate(latest,28),observed[observed.length-1]?.date||latest].sort().pop();
 const truth=observed.filter(r=>r.date>=begin&&r.date<=end);
