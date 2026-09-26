@@ -159,6 +159,52 @@ def test_deadline_rechecked_after_github_preparation(tmp_path, monkeypatch):
     assert not any(endpoint.endswith("/pulls") for endpoint, _ in requests)
 
 
+def test_open_retry_pr_is_updated_in_place(tmp_path, monkeypatch):
+    import base64
+
+    from mighte import submit as submission
+
+    requests = []
+    unchanged, changed = tmp_path / "same.yml", tmp_path / "new.yml"
+    unchanged.write_text("same bytes")
+    changed.write_text("new bytes")
+    retry = "codex/mighte-2026-27-metadata-20260926T005603392477"
+    open_pr = {"number": 3710, "html_url": "https://github.com/cdcepi/FluSight-forecast-hub/pull/3710",
+               "title": "old title", "body": "old body", "user": {"login": "test-user"},
+               "head": {"ref": retry, "sha": "pr-head"}}
+
+    def github(arguments, payload=None):
+        endpoint = arguments[1]
+        requests.append((endpoint, arguments[3] if len(arguments) > 3 else "GET", payload))
+        if endpoint == "user":
+            return {"login": "test-user"}
+        if endpoint == "repos/test-user/FluSight-forecast-hub":
+            return {"fork": True, "parent": {"full_name": submission.UPSTREAM}}
+        if endpoint.startswith(f"repos/{submission.UPSTREAM}/pulls?state=open"):
+            others = [{**open_pr, "number": n, "user": {"login": "someone"}} for n in range(99)]
+            return others + [open_pr] if "page=1" in endpoint else []
+        if "/contents/" in endpoint:
+            text = "same bytes" if "Base" in endpoint else "old bytes"
+            return {"content": base64.b64encode(text.encode()).decode()}
+        if endpoint.endswith("git/commits/pr-head"):
+            return {"tree": {"sha": "pr-tree"}}
+        return {"sha": "new-object"}
+
+    monkeypatch.setattr(submission, "gh_json", github)
+    url = create_pr(tmp_path, {"model-metadata/MIGHTE-Base.yml": unchanged,
+                               "model-metadata/MIGHTE-Nsemble.yml": changed},
+                    branch="codex/mighte-2026-27-metadata", title="new title", body="new body")
+    assert url == open_pr["html_url"]
+    blobs = [payload for endpoint, _, payload in requests if endpoint.endswith("git/blobs")]
+    assert [base64.b64decode(b["content"]) for b in blobs] == [b"new bytes"]
+    assert (f"repos/test-user/FluSight-forecast-hub/git/refs/heads/{retry}", "PATCH",
+            {"sha": "new-object", "force": False}) in requests
+    assert (f"repos/{submission.UPSTREAM}/pulls/3710", "PATCH", {"title": "new title", "body": "new body"}) in requests
+    # No second PR, no new branch and no pull-request history lookup.
+    assert not any(endpoint.endswith("/pulls") or endpoint.endswith("git/refs") or "state=all" in endpoint
+                   for endpoint, _, _ in requests)
+
+
 def test_registration_cancellation_makes_no_github_request(root, monkeypatch, capsys):
     from mighte import cli
 

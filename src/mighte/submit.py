@@ -40,9 +40,60 @@ def fresh_contract(root: Path) -> Contract:
     return Contract(directory)
 
 
+def open_pull_request(login: str, branch: str) -> dict | None:
+    """The user's open hub PR on this branch or on a timestamped retry of it."""
+    page = 1
+    while True:
+        pulls = gh_json(["api", f"repos/{UPSTREAM}/pulls?state=open&per_page=100&page={page}"])
+        for pr in pulls:
+            ref = pr["head"]["ref"]
+            if pr["user"]["login"] == login and (ref == branch or ref.startswith(branch + "-")):
+                return pr
+        if len(pulls) < 100:
+            return None
+        page += 1
+
+
+def update_pr(root: Path, files: dict[str, Path], pr: dict, fork: str, *, title: str, body: str,
+              reference: str | None) -> str:
+    """Add one commit with the changed files to an open PR and refresh its text."""
+    ref, head = pr["head"]["ref"], pr["head"]["sha"]
+    changed = {}
+    for name, path in sorted(files.items()):
+        try:
+            remote = gh_json(["api", f"repos/{fork}/contents/{name}?ref={head}"])
+            same = base64.b64decode(remote.get("content") or "") == path.read_bytes()
+        except RuntimeError:
+            same = False
+        if not same:
+            changed[name] = path
+    commit = head
+    if changed:
+        base = gh_json(["api", f"repos/{fork}/git/commits/{head}"])
+        entries = []
+        for name, path in changed.items():
+            blob = gh_json(["api", f"repos/{fork}/git/blobs", "--method", "POST"],
+                           {"content": base64.b64encode(path.read_bytes()).decode(), "encoding": "base64"})
+            entries.append({"path": name, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+        tree = gh_json(["api", f"repos/{fork}/git/trees", "--method", "POST"],
+                       {"base_tree": base["tree"]["sha"], "tree": entries})
+        commit = gh_json(["api", f"repos/{fork}/git/commits", "--method", "POST"],
+                         {"message": title, "tree": tree["sha"], "parents": [head]})["sha"]
+        if reference:
+            check_window(reference)
+        gh_json(["api", f"repos/{fork}/git/refs/heads/{ref}", "--method", "PATCH"], {"sha": commit, "force": False})
+    if pr["title"] != title or (pr.get("body") or "").strip() != body.strip():
+        gh_json(["api", f"repos/{UPSTREAM}/pulls/{pr['number']}", "--method", "PATCH"], {"title": title, "body": body})
+    write_json(root / ".runtime" / (ref.replace("/", "-") + ".json"),
+               {"url": pr["html_url"], "branch": ref, "commit": commit, "updated_at": utc_now(),
+                "updated_files": sorted(changed), "files": {name: digest(path) for name, path in files.items()}})
+    print(f"Updated open PR {pr['html_url']}" + (f": {', '.join(sorted(changed))}" if changed else " (files unchanged)"))
+    return pr["html_url"]
+
+
 def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, body: str,
               reference: str | None = None) -> str:
-    """Build a commit from upstream main so an old fork cannot contribute unrelated files."""
+    """Update the open PR for this branch, or build a new commit from upstream main."""
     if not files or any(not (name in {f"model-metadata/{m}.yml" for m in REGISTRATION_MODELS}
                               or any(name.startswith(f"model-output/{m}/") and name.endswith(f"-{m}.csv")
                                      for m in MODELS)) for name in files):
@@ -57,15 +108,10 @@ def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, bo
         repo = gh_json(["api", f"repos/{UPSTREAM}/forks", "--method", "POST"], {})
     if not repo.get("fork") or repo.get("parent", {}).get("full_name", UPSTREAM) != UPSTREAM:
         raise ValueError(f"{fork} is not a fork of {UPSTREAM}")
-    history = gh_json(["api", f"repos/{UPSTREAM}/pulls?state=all&head={login}:{branch}"])
-    existing = next((pr for pr in history if pr["state"] == "open"), None)
+    existing = open_pull_request(login, branch)
     if existing:
-        # Do not silently edit a previous PR. Return it only if every uploaded byte matches.
-        for name, path in files.items():
-            remote = gh_json(["api", f"repos/{fork}/contents/{name}?ref={branch}"])
-            if base64.b64decode(remote["content"]) != path.read_bytes():
-                raise ValueError(f"Open PR {existing['html_url']} differs from these files; close it or review the existing revision first")
-        return existing["html_url"]
+        return update_pr(root, files, existing, fork, title=title, body=body, reference=reference)
+    history = gh_json(["api", f"repos/{UPSTREAM}/pulls?state=all&head={login}:{branch}"])
     if history:
         # A deliberately closed PR stays closed. A later, explicitly requested
         # submission uses a new branch instead of reopening the old discussion.
