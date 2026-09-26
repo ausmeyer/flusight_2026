@@ -8,9 +8,9 @@ from pathlib import Path
 
 import requests
 
-from .contract import Contract, reference_saturday
+from .contract import MODELS, Contract, reference_saturday
 from .data import refresh, latest_snapshot
-from .pipeline import latest_run, run_forecasts, verify_run
+from .pipeline import latest_run, print_notices, run_forecasts, verify_run
 from .publish import prepare_publication, publish_report, repository
 from .report import build_report
 from .submit import REGISTRATION_MODELS, register, submit
@@ -22,7 +22,7 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("refresh", help="Download complete current hub/CDC histories, including revisions")
     for command in ["forecast", "preview"]:
-        p = sub.add_parser(command, help="Generate all three submission models" if command == "forecast"
+        p = sub.add_parser(command, help="Generate the submission models" if command == "forecast"
                            else "Non-submittable rehearsal, including pre-season dates")
         p.add_argument("--reference-date", default=None)
         p.add_argument("--no-open", action="store_true")
@@ -100,7 +100,9 @@ def main():
         else:
             run = args.run or latest_run(root)
             manifest = verify_run(root, run, for_submission=True)
-            print(f"Submit the three reviewed model files for {manifest['reference_date']}?\nRun: {run}")
+            models = manifest.get("models", list(MODELS))
+            print(f"Submit {', '.join(models)} for {manifest['reference_date']}?\nRun: {run}")
+            print_notices(manifest.get("notices", []))
             if not args.yes and input("Type submit to open the CDC pull request: ").strip() != "submit":
                 print("Submission cancelled.")
                 return

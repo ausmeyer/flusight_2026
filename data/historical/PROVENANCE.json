@@ -9,16 +9,9 @@
   },
   "hospitalization_proxy": {
     "rows": 24691,
-    "meaning": "Unadjusted ILINet/FluSurv training proxy, original log(rate+1) regression, rate rounded to 2 decimals, original population, count rounding, dates through 2019-06-30 shifted 728 days. Regime adjustment is applied at forecast time."
-  },
-  "hospitalization_calibration": {
-    "rows": 43506,
-    "regression_rows": 2740,
-    "intercept": 0.5253182615607082,
-    "slope": 0.5895968464296275,
-    "meaning": "Unshifted proxy counts before ED fraction and count rounding, used only for original state-specific legacy-regime offsets. Frozen calibration predictor history; observed outcomes and ED fractions are refreshed."
+    "meaning": "ILINet/FluSurv training proxy: original log(rate+1) regression, rate rounded to 2 decimals, original population, count rounding, dates through 2019-06-30 shifted 728 days. Observed NHSN counts follow from July 2021 as reported."
   },
   "ilinet_normalized": {
-    "meaning": "Original per-location bestNormalize(ILI+1) values from the April 25, 2026 study input. These are transformed inputs, not raw percentages."
+    "meaning": "Original per-location bestNormalize(ILI+1) values from the April 25, 2026 study input. These are transformed inputs, not raw percentages. Also used to build the ED training proxy (pooled ED log-odds regression, dates through 2019-06-30 shifted 728 days)."
   }
 }

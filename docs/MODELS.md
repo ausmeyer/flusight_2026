@@ -4,7 +4,7 @@ The prospective study window is the 2026–27 FluSight season. Models are fixed 
 
 ## Boosted components
 
-MIGHTE-Base hospitalization, the wastewater-only component and the NSSP-only component preserve the selected **joint-base / no-donor / corrected conditional Gaussian NLL** recipe. The ED component applies the same recipe to percentage-point ED history, with wastewater as the external predictor. It is a separate fit; it is not trained as an auxiliary response in the hospitalization model.
+MIGHTE-Base hospitalization, the wastewater-only component and the NSSP-only component preserve the selected **joint-base / no-donor / corrected conditional Gaussian NLL** recipe. The ED component applies the same recipe to percentage-point ED history (observed NSSP plus the ILINet-based proxy described in [DATA.md](DATA.md)), with wastewater as the external predictor. It is a separate fit; it is not trained as an auxiliary response in the hospitalization model.
 
 - Own-history lags: 1, 2, 3, 4, 5, 6, 8, 12, 26, 52 weeks; differences, percentage changes, rolling means/spreads, seasonal harmonics, regime indicators, location indicators, and lagged national summaries.
 - No individual donor-state features. The legacy `donor_lags` field also enters the shared national lag-set definition, so it is retained in the ported runtime record; it does not enable donor features.
@@ -32,7 +32,7 @@ At every location, horizon and quantile: `(WW-only + NSSP-only + Linear) / 3`. A
 
 ## Target conventions
 
-The anchor is reference Saturday minus seven days. Horizons 0–3 correspond to anchor leads 1–4. Prospective runs require fresh Wednesday inputs and observed hospitalization anchors for all 53 jurisdictions including US. ED locations without an observed anchor are omitted and named in the report. National forecasts are model outputs, not a sum of state quantiles. Training proxies/interpolated gaps are never scored as observed truth.
+The anchor is reference Saturday minus seven days. Horizons 0–3 correspond to anchor leads 1–4. Prospective runs require fresh Wednesday inputs. Locations without an observed anchor are omitted for that target and listed as notices. National forecasts are model outputs, not a sum of state quantiles. Training proxies/interpolated gaps are never scored as observed truth.
 
 ED forecasts use a Gaussian working distribution for changes in log-odds and are exported as proportions bounded to [0,1] by the inverse link. This replaces log1p of percentage points, whose additive offset was one percentage point. The boundary convention handles rounded zeros; it is not an estimated correction for reporting or backfill. A bounded link and a successful numerical fit do not establish interval calibration, which requires observed forecast outcomes. The hub's written plausibility limit of 0.25 is checked and triggers a failure if exceeded; forecasts are not silently truncated to that plausibility threshold. Hospitalization forecasts are integer-valued, nonnegative and checked against the written 30%-of-population bound.
 

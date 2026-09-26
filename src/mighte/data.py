@@ -173,8 +173,7 @@ def refresh(root: Path) -> Path:
         hosp_sources.append(("FluSight hub", hub_hosp, hub_hosp_time))
         hosp, hosp_audit = choose_truth(hosp_sources, HOSP)
 
-        raw_ed, ed_time = download.socrata("rdmq-nq56", "week_end,geography,percent_visits_influenza,percent_visits_combined",
-                                           "county='All'")
+        raw_ed, ed_time = download.socrata("rdmq-nq56", "week_end,geography,percent_visits_influenza", "county='All'")
         frame = pd.DataFrame({"date": raw_ed.week_end,
                               "location": raw_ed.geography.replace({"United States": "US"}).map(location_names),
                               "value": pd.to_numeric(raw_ed.percent_visits_influenza, errors="coerce") / 100})
@@ -189,14 +188,6 @@ def refresh(root: Path) -> Path:
         # about the actual publication date. Retrieval timestamps establish what was known.
         national["available_date"] = national.date + pd.Timedelta(weeks=1)
         national.to_csv(staging / "nssp.csv", index=False, date_format="%Y-%m-%d")
-        # The old hospitalization stitch used flu / combined respiratory ED visits
-        # when constructing legacy training values and the regime-calibration proxy.
-        fractions = pd.DataFrame({"date": pd.to_datetime(raw_ed.week_end),
-                                  "location_name": raw_ed.geography.replace({"United States": "US"}),
-                                  "scale_factor": pd.to_numeric(raw_ed.percent_visits_influenza, errors="coerce")
-                                      / pd.to_numeric(raw_ed.percent_visits_combined, errors="coerce").replace(0, np.nan)})
-        fractions = fractions[fractions.location_name.isin(location_names)]
-        fractions.to_csv(staging / "ed-fractions.csv", index=False, date_format="%Y-%m-%d")
         raw_ww, _ = download.socrata("ymmh-divb", "site,sample_collect_date,pcr_target_mic_lin",
                                      "source='WastewaterSCAN' AND pcr_target='fluav'")
         wastewater_weekly(raw_ww).to_csv(staging / "wastewater.csv", index=False, date_format="%Y-%m-%d")
@@ -232,114 +223,58 @@ def verify_snapshot(directory: Path) -> dict:
     return manifest
 
 
-def weekly_grid(frame: pd.DataFrame, anchor: pd.Timestamp) -> tuple[pd.DataFrame, int]:
+def weekly_grid(frame: pd.DataFrame, anchor: pd.Timestamp, *, interpolate=True) -> tuple[pd.DataFrame, int]:
+    """Complete weekly grid per location; inside-only linear interpolation, never extrapolation."""
     parts, interpolated = [], 0
     for location, group in frame.groupby("location_name", sort=True):
         values = group.set_index("date").total_hosp.sort_index()
         values = values.reindex(pd.date_range(values.first_valid_index(), anchor, freq="W-SAT"))
-        before = values.isna().sum()
-        values = values.interpolate(method="linear", limit_area="inside")
-        interpolated += int(before - values.isna().sum())
+        if interpolate:
+            before = values.isna().sum()
+            values = values.interpolate(method="linear", limit_area="inside")
+            interpolated += int(before - values.isna().sum())
         parts.append(pd.DataFrame({"location_name": location, "date": values.index,
                                     "total_hosp": values.to_numpy()}))
     return pd.concat(parts, ignore_index=True), interpolated
 
 
-def attach_ed_fraction(frame: pd.DataFrame, fractions: pd.DataFrame) -> pd.DataFrame:
-    """Original stitch: carry fractions forward within location; leading missing = 1."""
-    parts = []
-    for name, group in frame.groupby("location_name", sort=True):
-        values = fractions.loc[fractions.location_name.eq(name), ["date", "scale_factor"]].set_index("date").scale_factor
-        if values.index.duplicated().any():
-            raise ValueError(f"Duplicate ED fractions for {name}")
-        values = values.reindex(values.index.union(pd.DatetimeIndex(group.date))).sort_index().ffill().fillna(1)
-        parts.append(group.assign(scale_factor=group.date.map(values)))
-    return pd.concat(parts, ignore_index=True)
-
-
-def hospitalization_history(root: Path, snapshot: Path, observed: pd.DataFrame, anchor: pd.Timestamp):
-    """Preserve the study's legacy ED fraction and bounded state-specific log shift."""
-    observed = observed[observed.date.le(anchor)].copy()
-    # Preserve the recorded fraction exactly; one ULP can change count rounding.
-    fractions = pd.read_csv(snapshot / "ed-fractions.csv", parse_dates=["date"], float_precision="round_trip")
-    fractions = fractions[fractions.date.le(anchor)]
-    proxy = pd.read_csv(root / "data/historical/hospitalization_calibration.csv", parse_dates=["date"],
-                        float_precision="round_trip")
-    proxy = attach_ed_fraction(proxy[proxy.date.le(anchor)], fractions)
-    proxy["proxy_hosp"] = np.rint(proxy.proxy_hosp_continuous * proxy.scale_factor)
-    paired = observed[observed.date.ge("2021-07-01")].merge(
-        proxy[["date", "location_name", "proxy_hosp"]], on=["date", "location_name"], validate="one_to_one")
-    paired["residual"] = np.log1p(paired.total_hosp.clip(lower=0)) - np.log1p(paired.proxy_hosp)
-    paired = paired[np.isfinite(paired.residual)].copy()
-    shifts = []
-    for name in sorted(observed.location_name.unique()):
-        group = paired[paired.location_name.eq(name)]
-        legacy = group.loc[group.date.lt("2024-11-01"), "residual"]
-        current = group.loc[group.date.ge("2024-11-01"), "residual"]
-        delta = float(np.clip(current.median() - legacy.median(), -np.log(2), np.log(2))) if len(legacy) >= 26 and len(current) >= 8 else 0.
-        shifts.append({"location_name": name, "shift_legacy_to_current": delta,
-                       "n_legacy": len(legacy), "n_current": len(current)})
-    shift_table = pd.DataFrame(shifts)
+def hospitalization_history(root: Path, observed: pd.DataFrame, anchor: pd.Timestamp) -> tuple[pd.DataFrame, int]:
+    """ILINet/FluSurv proxy seed through June 2021 (dates shifted 728 days), then NHSN counts as reported."""
+    observed = observed[observed.date.le(anchor)]
     seed = pd.read_csv(root / "data/historical/hospitalization_proxy.csv", parse_dates=["date"])
     seed = seed[seed.location_name.isin(observed.location_name.unique()) & seed.date.le(anchor)]
     model = pd.concat([seed, observed[observed.date.ge("2021-07-01")]], ignore_index=True)
-    model = attach_ed_fraction(model, fractions)
-    early = model.date.lt("2024-05-01")
-    model.loc[early, "total_hosp"] = np.rint(np.rint(model.loc[early, "total_hosp"]) * model.loc[early, "scale_factor"])
-    model, interpolated = weekly_grid(model[["location_name", "date", "total_hosp"]], anchor)
-    model = model.merge(shift_table[["location_name", "shift_legacy_to_current"]], on="location_name", validate="many_to_one")
-    legacy = model.date.lt("2024-11-01")
-    model.loc[legacy, "total_hosp"] = np.rint(np.maximum(np.expm1(
-        np.log1p(model.loc[legacy, "total_hosp"].clip(lower=0)) + model.loc[legacy, "shift_legacy_to_current"]), 0))
-    return model[["location_name", "date", "total_hosp"]], interpolated, {
-        "method": "Original ED-fraction preprocessing before May 2024; original legacy-to-current log shift before November 2024",
-        "max_multiplier": 2, "minimum_legacy_weeks": 26, "minimum_current_weeks": 8,
-        "calibration_predictor_end": proxy.date.max().date().isoformat(), "locations": shift_table.to_dict("records")}
+    return weekly_grid(model[["location_name", "date", "total_hosp"]], anchor)
 
 
-def reconstruct_ed(root: Path, observed: pd.DataFrame, settings: dict, transform: dict) -> tuple[pd.DataFrame, dict]:
+def ed_ilinet_proxy(root: Path, observed: pd.DataFrame, transform: dict) -> tuple[pd.DataFrame, dict]:
+    """ILINet-based ED history built like the hospitalization seed.
+
+    A pooled regression of observed ED log-odds on normalized ILINet, fitted where both exist,
+    is applied to each location's ILINet through June 2019. Dates shift forward 728 days and
+    percentages are rounded to NSSP's 0.01-point reporting precision.
+    """
     epsilon = boundary_epsilon(transform)
-    mode = settings["mode"]
-    if mode == "observed":
-        return observed, {"mode": mode, "proxy_rows": 0}
-    if mode not in {"post2022_proxy", "prepandemic_proxy"}:
-        raise ValueError("ed_history.mode must be observed, post2022_proxy or prepandemic_proxy")
     ili = pd.read_csv(root / "data/historical/ilinet_normalized.csv", parse_dates=["date"])
-    if mode == "prepandemic_proxy":
-        filename = settings.get("historical_nssp_file")
-        if not filename:
-            raise ValueError("Set ed_history.historical_nssp_file to a repository-local CSV of date,value (proportion)")
-        path = (root / filename).resolve()
-        if not path.is_relative_to(root.resolve()):
-            raise ValueError("Historical NSSP must be stored inside this standalone repository")
-        national = pd.read_csv(path, parse_dates=["date"])
-        if national.date.duplicated().any() or not national.date.dt.weekday.eq(5).all():
-            raise ValueError("Historical national NSSP requires one observation per Saturday week ending")
-        if not national.value.between(0, 1).all() or (national.date >= "2020-03-01").any():
-            raise ValueError("Historical national NSSP must contain pre-pandemic proportions in [0,1]")
-        national = national.rename(columns={"value": "total_hosp"})
-        national["total_hosp"] *= 100
-    else:
-        national = observed[observed.location_name.eq("US")]
-    paired = ili[ili.location_name.eq("US")].merge(national[["date", "total_hosp"]], on="date",
-                                                   validate="one_to_one").dropna()
+    paired = ili.merge(observed.dropna(subset=["total_hosp"]), on=["location_name", "date"], validate="one_to_one")
     if len(paired) < 52 or paired.ili.std() < 1e-8:
         raise ValueError("At least 52 paired weeks with varying ILINet are required for ED reconstruction")
     design = np.column_stack([np.ones(len(paired)), paired.ili])
     coefficients = np.linalg.lstsq(design, ed_logit(paired.total_hosp / 100, epsilon), rcond=None)[0]
-    # Use the same source-history cutoff and 728-day shift as hospitalization.
-    proxy = ili[ili.date.le("2019-06-30")].copy()
-    proxy["total_hosp"] = 100 * expit(coefficients[0] + coefficients[1] * proxy.ili)
+    proxy = ili[ili.date.le("2019-06-30") & ili.location_name.isin(observed.location_name.unique())].copy()
+    proxy["total_hosp"] = np.round(100 * expit(coefficients[0] + coefficients[1] * proxy.ili), 2)
     proxy["date"] += pd.Timedelta(days=728)
-    proxy = proxy[proxy.location_name.isin(observed.location_name.unique())]
-    proxy = proxy[["location_name", "date", "total_hosp"]]
-    merged = pd.concat([proxy, observed]).drop_duplicates(["location_name", "date"], keep="last")
-    return merged, {"mode": mode, "proxy_rows": len(proxy), "mapping_weeks": len(paired),
-                     "coefficients": coefficients.tolist(), "shift_days": 728, "response_transform": transform,
-                     "note": "Training proxy only. The post2022 option assumes the national ILI-to-ED relationship transfers across eras and locations."}
+    return proxy[["location_name", "date", "total_hosp"]], {
+        "mode": "ilinet_proxy", "proxy_rows": len(proxy), "mapping_rows": len(paired),
+        "mapping_locations": int(paired.location_name.nunique()), "coefficients": coefficients.tolist(),
+        "source_end": "2019-06-30", "shift_days": 728, "response_transform": transform}
+
+
+LABELS = {HOSP: "Hospital admissions", ED: "ED visits"}
 
 
 def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -> tuple[dict, dict]:
+    """Training histories and availability. Missing inputs omit only what depends on them, with notices."""
     epsilon = boundary_epsilon(settings["ed_target_transform"])
     anchor = pd.Timestamp(reference) - pd.Timedelta(weeks=1)
     contract = Contract(snapshot / "contract")
@@ -347,27 +282,37 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
     truth = pd.read_csv(snapshot / "truth.csv", dtype={"location": str}, parse_dates=["date"])
     truth = truth[truth.date.le(anchor)].copy()
     truth["location_name"] = truth.location.map(names)
-    inputs, audit = {}, {}
+    inputs, audit, notices = {}, {}, []
     for target in [HOSP, ED]:
-        history = truth[truth.target.eq(target)].copy()
-        current = history[history.date.eq(anchor) & history.value.notna()]
-        eligible = set(current.location)
         allowed = set(contract.by_target[target]["task_ids"]["location"]["optional"])
-        if target == HOSP and eligible != allowed:
-            raise ValueError(f"Hospitalizations missing at {anchor.date()}: {sorted(allowed - eligible)}. "
-                             "Wait for this week's data release; forecasts will not be relabeled.")
-        if "US" not in eligible:
-            raise ValueError(f"National {target} missing at {anchor.date()}")
-        history = history[history.location.isin(eligible)]
-        model = history[["location_name", "date", "value"]].rename(columns={"value": "total_hosp"})
+        observed = truth[truth.target.eq(target) & truth.location.isin(allowed) & truth.value.notna()]
+        forecastable = set(observed.loc[observed.date.eq(anchor), "location"])
+        recent = set(observed.loc[observed.date.ge(anchor - pd.Timedelta(weeks=8)), "location"])
+        audit[target] = {"anchor": anchor.date().isoformat(), "locations": sorted(forecastable),
+                         "excluded_locations": sorted(allowed - forecastable)}
+        if not forecastable:
+            notices.append(f"{LABELS[target]}: no {anchor.date()} values released; target omitted")
+            continue
+        if recent - forecastable:
+            missing = ", ".join(sorted(names[x] for x in recent - forecastable))
+            notices.append(f"{LABELS[target]}: no {anchor.date()} value for {missing}; omitted for those locations")
+        model = observed[["location_name", "date", "value"]].rename(columns={"value": "total_hosp"})
         if target == HOSP:
-            model, n_filled, adjustment = hospitalization_history(root, snapshot, model, anchor)
-            audit["hospitalization_adjustment"] = adjustment
+            model, n_filled = hospitalization_history(root, model, anchor)
         else:
             model["total_hosp"] *= 100  # predictors in percentage points; response link uses proportions
-            model, reconstruction = reconstruct_ed(root, model, settings["ed_history"], settings["ed_target_transform"])
-            audit["ed_reconstruction"] = reconstruction
-            model, n_filled = weekly_grid(model, anchor)
+            mode = settings["ed_history"]["mode"]
+            if mode == "ilinet_proxy":
+                proxy, audit["ed_reconstruction"] = ed_ilinet_proxy(root, model, settings["ed_target_transform"])
+                model, n_filled = weekly_grid(model, anchor)
+                proxy, _ = weekly_grid(proxy, proxy.date.max())
+                # Keep the gap between the proxy and observed eras missing rather than interpolated.
+                model, _ = weekly_grid(pd.concat([proxy, model]), anchor, interpolate=False)
+            elif mode == "observed":
+                audit["ed_reconstruction"] = {"mode": mode, "proxy_rows": 0}
+                model, n_filled = weekly_grid(model, anchor)
+            else:
+                raise ValueError("ed_history.mode must be observed or ilinet_proxy")
             proportions = model.total_hosp / 100
             ed_logit(proportions.dropna(), epsilon)
             boundary = (proportions < epsilon) | (proportions > 1 - epsilon)
@@ -376,15 +321,24 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
                 "boundary_anchor_observations": int((boundary & model.date.eq(anchor)).sum()),
                 "boundary_policy": "Clip response-link inputs only; do not alter truth or predictor history"}
         inputs[target] = model
-        audit[target] = {"anchor": anchor.date().isoformat(), "locations": sorted(eligible),
-                          "excluded_locations": sorted(allowed - eligible), "training_rows": len(model),
-                          "interpolated_training_values": n_filled}
+        audit[target].update(training_rows=len(model), interpolated_training_values=n_filled)
+    week = pd.Timedelta(weeks=1)
     nssp = pd.read_csv(snapshot / "nssp.csv", parse_dates=["date"])
-    if nssp.loc[nssp.date.eq(anchor), NSSP].dropna().empty:
-        raise ValueError("Missing current national NSSP covariate")
     ww = pd.read_csv(snapshot / "wastewater.csv", parse_dates=["date"])
-    usable = ww[ww.date.le(anchor - pd.Timedelta(weeks=1)) & ww[WW].notna()]
-    if usable.empty or usable.date.max() < anchor - pd.Timedelta(weeks=2):
-        raise ValueError("WastewaterSCAN covariate is missing or beyond the frozen staleness limit")
-    audit["wastewater_week_used"] = usable.date.max().date().isoformat()
+    covariates = {}
+    # Frozen recipe: NSSP through the anchor, wastewater through the week before; each may be one week stale.
+    for key, label, frame, column, expected in [("nssp", "National NSSP", nssp, NSSP, anchor),
+                                                ("ww", "WastewaterSCAN", ww, WW, anchor - week)]:
+        latest = frame.loc[frame.date.le(expected) & frame[column].notna(), "date"].max()
+        available = pd.notna(latest) and latest >= expected - week
+        covariates[key] = {"available": bool(available), "expected_week": expected.date().isoformat(),
+                           "week_used": latest.date().isoformat() if available else None}
+        if not available:
+            since = f" since {latest.date()}" if pd.notna(latest) else ""
+            notices.append(f"{label} covariate missing{since}; forecasts that use it are omitted")
+        elif latest < expected:
+            notices.append(f"{label} for {expected.date()} not yet available; used {latest.date()} "
+                           "(the model's one-week staleness allowance)")
+    audit["covariates"] = covariates
+    audit["notices"] = notices
     return inputs, audit

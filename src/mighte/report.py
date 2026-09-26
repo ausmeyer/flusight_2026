@@ -97,6 +97,7 @@ TEMPLATE = r'''<!doctype html>
 body{margin:0}main{max-width:1450px;margin:auto;padding:28px 32px 50px}h1{font-size:30px;letter-spacing:-1px;margin:4px 0}
 .eyebrow{color:#367b80;font-size:12px;font-weight:750;letter-spacing:2px}.muted{color:#5b6f7c;font-size:13px;line-height:1.65}
 .head{display:flex;justify-content:space-between;gap:18px;align-items:center}
+.notices{margin-top:16px;border:1px solid #e3c98f;background:#fff8e8;border-radius:10px;padding:12px 16px;font-size:13px;color:#5a4712}.notices ul{margin:6px 0 0;padding-left:18px}.notices[hidden]{display:none}
 .card{margin-top:22px;border:1px solid #dce4e8;border-radius:13px;background:white;padding:22px;box-shadow:0 2px 3px #19333e04}
 h2{font-size:18px;margin:0 0 15px}.controls{display:flex;gap:16px;align-items:end;flex-wrap:wrap}label{font-size:12px;font-weight:650;display:flex;flex-direction:column;gap:7px}
 select{font:inherit;min-width:160px;border:1px solid #c5d2d9;border-radius:6px;padding:8px 30px 8px 12px;appearance:none;color:#213f50;
@@ -118,6 +119,7 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 @media(max-width:720px){main{padding:18px 12px}.card{padding:13px}.head{display:block}#chart{height:350px}.timeline{gap:12px}.timeline select{min-width:125px}}
 </style></head><body><main>
 <div class="head"><div><div class="eyebrow">MIGHTE / FLUSIGHT 2026–27</div><h1>Weekly forecast review</h1></div></div>
+<div id="notices" class="notices" hidden><strong>This week's output is affected by:</strong><ul></ul></div>
 <section class="card"><h2>Prospective forecasts</h2><div class="controls">
 <label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">ED visits</option><option value="wk flu hosp rate change">Hospitalization trend</option></select></label>
 <label>Location<select id="location"></select></label>
@@ -222,6 +224,7 @@ const tr=theta('wis'),tl=theta('wis_log1p');
 let html='<table><thead><tr>'+['Model','N','Matched','Mean WIS','Geo WIS','Geo log-WIS','MAE','Rel WIS','Rel log-WIS','WIS skill','50% coverage','80% coverage','95% coverage'].map(x=>'<th>'+x+'</th>').join('')+'</tr></thead><tbody>';
 visible.forEach(m=>{const g=groups[m],bm=maps[base]||new Map();let a=0,b=0,n=0;g.forEach(r=>{const br=bm.get(key(r));if(br){a+=r.wis;b+=br.wis;n++}});const skill=n&&b>0?1-a/b:null;const cells=[esc(m),g.length,n,fmt(mean(g.map(r=>r.wis)),digits),fmt(geom(g.map(r=>r.wis)),digits),fmt(geom(g.map(r=>r.wis_log1p)),Math.max(digits,5)),fmt(mean(g.map(r=>r.ae)),digits),fmt(tr[base]>0?tr[m]/tr[base]:null),fmt(tl[base]>0?tl[m]/tl[base]:null),pct(skill),pct(mean(g.map(r=>r.coverage_50))),pct(mean(g.map(r=>r.coverage_80))),pct(mean(g.map(r=>r.coverage_95)))];html+='<tr>'+cells.map((x,i)=>`<td class="${i===9&&skill!==null?(skill>=0?'positive':'negative'):''}">${x}</td>`).join('')+'</tr>'});
 el('accuracy').innerHTML=html+'</tbody></table>';}
+const notices=D.manifest.notices||[];if(notices.length){el('notices').querySelector('ul').innerHTML=notices.map(n=>'<li>'+esc(n)+'</li>').join('');el('notices').hidden=false}
 el('provenance').textContent=`Forecast inputs: ${D.manifest.snapshot_id}. Scoring truth: ${D.truth_snapshot}. Report: ${new Date(D.generated_at).toLocaleString()}. Run: ${D.manifest.run_id}.`;
 ['audit','benchmarks','manifest'].forEach(id=>el(id).textContent=JSON.stringify(id==='audit'?D.data_audit:id==='benchmarks'?D.benchmarks:D.manifest,null,2));
 ['reference','target','location','history'].forEach(id=>el(id).addEventListener('change',plot));el('models').addEventListener('change',plot);

@@ -19,6 +19,12 @@ from .models import distributional, equal_quantiles, linear, persistence_baselin
 from .util import code_hash, digest, utc_now, write_json
 
 
+TARGET_LABELS = {HOSP: "hospital admissions", ED: "ED visits", TREND: "hospitalization trends"}
+COMPONENT_INPUTS = {"linear": ("hosp",), "base-hospitalizations": ("hosp", "ww", "nssp"),
+                    "ww-hospitalizations": ("hosp", "ww"), "nssp-hospitalizations": ("hosp", "nssp"),
+                    "base-ed": ("ed", "ww"), "base-ordinal": ("hosp", "ww", "nssp")}
+
+
 def environment() -> dict:
     return {"python": platform.python_version(), **{p: importlib.metadata.version(p)
             for p in ["numpy", "pandas", "scipy", "lightgbm"]}}
@@ -26,8 +32,6 @@ def environment() -> dict:
 
 def input_hashes(root: Path, settings: dict) -> dict:
     paths = sorted((root / "data/historical").glob("*.csv"))
-    if settings["ed_history"].get("historical_nssp_file"):
-        paths.append(root / settings["ed_history"]["historical_nssp_file"])
     return {str(p.relative_to(root)): digest(p) for p in paths}
 
 
@@ -106,38 +110,44 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
             raise ValueError("Production forecasts require a fresh Wednesday data snapshot")
     contract = Contract(snapshot / "contract")
     location_map = dict(zip(contract.locations.location_name, contract.locations.location))
+    names = dict(zip(contract.locations.location, contract.locations.location_name))
     histories, audit = prepare_inputs(root, snapshot, reference, settings)
+    notices = audit["notices"]
     write_json(run / "data-audit.json", audit)
     components = run / "components"
     components.mkdir(exist_ok=True)
     for target, history in histories.items():
         history.to_csv(run / ("hospitalization-training.csv" if target == HOSP else "ed-training.csv"), index=False)
 
-    with threadpool_limits(limits=int(settings["threads"])):
-        linear_file = components / "linear.csv"
-        if not linear_file.exists():
-            print("Fitting MIGHTE-Linear...", flush=True)
-            write_forecast(linear_file, linear(histories[HOSP], reference, settings, location_map))
-        linear_frame = read_forecast(linear_file)
-    jobs = [("base-hospitalizations", HOSP, ("ww", "nssp")),
-            ("ww-hospitalizations", HOSP, ("ww",)),
-            ("nssp-hospitalizations", HOSP, ("nssp",)), ("base-ed", ED, ("ww",))]
+    # A component runs only when its target and covariates are available this week.
+    available = {"hosp": HOSP in histories, "ed": ED in histories,
+                 **{key: audit["covariates"][key]["available"] for key in ["ww", "nssp"]}}
+    runnable = {name for name, needs in COMPONENT_INPUTS.items() if all(available[x] for x in needs)}
+    results = {}
+    if "linear" in runnable:
+        with threadpool_limits(limits=int(settings["threads"])):
+            linear_file = components / "linear.csv"
+            if not linear_file.exists():
+                print("Fitting MIGHTE-Linear...", flush=True)
+                write_forecast(linear_file, linear(histories[HOSP], reference, settings, location_map))
+            results["linear"] = read_forecast(linear_file)
+    jobs = [job for job in [("base-hospitalizations", HOSP, ("ww", "nssp")),
+                            ("ww-hospitalizations", HOSP, ("ww",)),
+                            ("nssp-hospitalizations", HOSP, ("nssp",)), ("base-ed", ED, ("ww",))]
+            if job[0] in runnable]
     args = (run, snapshot, reference, settings, location_map)
     workers = int(settings.get("component_workers", 2))
     if workers not in {1, 2}:
         raise ValueError("component_workers must be 1 or 2")
     if workers == 1:
-        results = [fit_component(*job, *args) for job in jobs]
+        fitted = [fit_component(*job, *args) for job in jobs]
     else:
         # Spawn avoids inheriting native OpenMP state from the linear fit.
         with ProcessPoolExecutor(max_workers=workers, mp_context=get_context("spawn")) as executor:
             futures = [executor.submit(fit_component, *job, *args) for job in jobs]
-            results = [future.result() for future in futures]
-    base_hosp, ww, nssp, ed = results
-    forecasts = {"MIGHTE-Base": pd.concat([base_hosp, ed], ignore_index=True),
-                 "MIGHTE-Linear": linear_frame,
-                 "MIGHTE-Nsemble": equal_quantiles([ww, nssp, linear_frame])}
-    if settings.get("ordinal_plugin"):
+            fitted = [future.result() for future in futures]
+    results.update({job[0]: frame for job, frame in zip(jobs, fitted)})
+    if settings.get("ordinal_plugin") and "base-ordinal" in runnable:
         module, name = settings["ordinal_plugin"].split(":")
         if not module.startswith("mighte."):
             raise ValueError("Keep ordinal plugin code inside this standalone mighte package")
@@ -150,47 +160,88 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
             with threadpool_limits(limits=int(settings["threads"])):
                 ordinal = fn({"reference_date": reference, "snapshot_path": snapshot,
                               "hospitalization_history": ordinal_history,
-                              "base_hospitalization_quantiles": base_hosp.copy(), "settings": settings,
-                              "checkpoint_path": ordinal_checkpoint})
+                              "base_hospitalization_quantiles": results["base-hospitalizations"].copy(),
+                              "settings": settings, "checkpoint_path": ordinal_checkpoint})
             if ordinal.empty or set(ordinal.columns) != set(COLUMNS):
                 raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
             write_forecast(ordinal_path, ordinal)
         ordinal = read_forecast(ordinal_path)
         if ordinal.empty or set(ordinal.target) != {TREND} or set(ordinal.columns) != set(COLUMNS):
             raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
-        forecasts["MIGHTE-Base"] = pd.concat([forecasts["MIGHTE-Base"], ordinal], ignore_index=True)
+        results["base-ordinal"] = ordinal
         if (ordinal_checkpoint / "fit.json").exists():
             audit["ordinal"] = json.loads((ordinal_checkpoint / "fit.json").read_text())
             write_json(run / "data-audit.json", audit)
+
+    forecasts, expected_targets = {}, {}
+    base_parts = {HOSP: "base-hospitalizations", ED: "base-ed"}
+    if settings.get("ordinal_plugin"):
+        base_parts[TREND] = "base-ordinal"
+    parts = {target: component for target, component in base_parts.items() if component in results}
+    if parts:
+        forecasts["MIGHTE-Base"] = pd.concat([results[c] for c in parts.values()], ignore_index=True)
+        expected_targets["MIGHTE-Base"] = set(parts)
+        if set(parts) != set(base_parts):
+            notices.append("MIGHTE-Base produced without " + ", ".join(
+                TARGET_LABELS[t] for t in base_parts if t not in parts))
+    if "linear" in results:
+        forecasts["MIGHTE-Linear"] = results["linear"]
+        expected_targets["MIGHTE-Linear"] = {HOSP}
+    if {"ww-hospitalizations", "nssp-hospitalizations", "linear"} <= set(results):
+        forecasts["MIGHTE-Nsemble"] = equal_quantiles(
+            [results["ww-hospitalizations"], results["nssp-hospitalizations"], results["linear"]])
+        expected_targets["MIGHTE-Nsemble"] = {HOSP}
+    missing_models = [model for model in MODELS if model not in forecasts]
+    if missing_models:
+        notices.append("Not produced this week: " + ", ".join(missing_models))
+    if not forecasts:
+        raise ValueError("No forecasts could be produced:\n- " + "\n- ".join(notices))
+
     validation = {}
     for model, frame in forecasts.items():
         hosp = frame.target.eq(HOSP)
         frame.loc[hosp, "value"] = np.rint(frame.loc[hosp, "value"])
-        targets = [HOSP, ED] if model == "MIGHTE-Base" else [HOSP]
-        if model == "MIGHTE-Base" and settings.get("ordinal_plugin"):
-            targets.append(TREND)
-        for target in targets:
+        # The hub flags these quantiles for review; remove only the affected location-horizons.
+        flagged = contract.implausible_units(frame)
+        if not flagged.empty:
+            frame = frame.merge(flagged.assign(_flagged=True), on=["target", "location", "horizon"], how="left")
+            frame = frame[frame.pop("_flagged").isna()].reset_index(drop=True)
+            for target, group in flagged.groupby("target"):
+                units = "; ".join(f"{names[location]} h{','.join(str(h) for h in sorted(g.horizon))}"
+                                  for location, g in group.groupby("location"))
+                notices.append(f"{model} {TARGET_LABELS[target]}: removed {units} "
+                               "(quantiles above the hub's plausibility limit)")
+        for target in expected_targets[model]:
             expected = set(audit[HOSP if target == TREND else target]["locations"])
             for horizon in range(4):
+                removed = set(flagged.loc[flagged.target.eq(target) & flagged.horizon.eq(horizon), "location"])
                 actual = set(frame.loc[frame.target.eq(target) & frame.horizon.eq(horizon), "location"])
-                if actual != expected:
+                if actual != expected - removed:
                     raise ValueError(f"Incomplete forecast coverage in {model}, {target}, horizon {horizon}")
         path = run / "model-output" / model / f"{reference}-{model}.csv"
         write_forecast(path, frame)
         # Validate the serialized bytes, which are exactly what will be submitted.
         validation[model] = contract.validate(read_forecast(path), model, reference, preview=preview)
-    baseline = pd.concat([persistence_baseline(histories[t], reference, t, location_map) for t in [HOSP, ED]])
+    baseline = pd.concat([persistence_baseline(history, reference, target, location_map, audit[target]["locations"])
+                          for target, history in histories.items()])
     write_forecast(run / "local-baseline.csv", baseline)
     if not preview:
         check_window(reference)
     manifest.update(status="complete", completed_at=utc_now(), validation=validation,
+                    models=sorted(forecasts), notices=notices,
                     output_hashes={str(p.relative_to(run)): digest(p) for p in (run / "model-output").rglob("*.csv")},
                     baseline_sha256=digest(run / "local-baseline.csv"))
     write_json(run / "manifest.json", manifest)
     write_json(root / "runs" / ("latest-preview.json" if preview else "latest.json"),
                {"run_id": manifest["run_id"]})
-    print(f"Validated all three model files: {run}", flush=True)
+    print(f"Validated {len(forecasts)} model file(s): {run}", flush=True)
+    print_notices(notices)
     return run
+
+
+def print_notices(notices: list[str]) -> None:
+    if notices:
+        print("Notices (these affect this week's output):\n- " + "\n- ".join(notices), flush=True)
 
 
 def latest_run(root: Path, *, preview=False) -> Path:
@@ -215,9 +266,12 @@ def verify_run(root: Path, run: Path, *, for_submission=False) -> dict:
             raise ValueError(f"Forecast was edited after validation: {filename}")
         contract.validate(read_forecast(path), path.parent.name, manifest["reference_date"],
                           preview=manifest["preview"])
-    expected_paths = {f"model-output/{model}/{manifest['reference_date']}-{model}.csv" for model in MODELS}
+    models = manifest.get("models", list(MODELS))
+    if not models or not set(models) <= set(MODELS):
+        raise ValueError("Run lists no valid submission model")
+    expected_paths = {f"model-output/{model}/{manifest['reference_date']}-{model}.csv" for model in models}
     if set(manifest["output_hashes"]) != expected_paths:
-        raise ValueError("Run must contain exactly the three expected model files")
+        raise ValueError("Run files do not match its recorded models")
     if digest(run / "local-baseline.csv") != manifest["baseline_sha256"]:
         raise ValueError("Frozen local baseline changed")
     if for_submission:

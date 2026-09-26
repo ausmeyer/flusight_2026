@@ -15,9 +15,11 @@ from mighte.submit import create_pr
 from mighte.util import digest, write_json
 
 
-@pytest.mark.parametrize("with_ordinal", [False, True])
-def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch, with_ordinal):
-    """Exercise orchestration, serializers and guards in a separate project directory."""
+ANCHOR = pd.Timestamp("2026-10-03")
+
+
+def synthetic_project(root, tmp_path, *, with_ordinal=True, mutate=None):
+    """A three-location project and sealed snapshot; mutate(truth, nssp, ww) edits inputs first."""
     for directory in ["config", "hub-contract", "data/historical"]:
         shutil.copytree(root / directory, tmp_path / directory)
     settings = json.loads((tmp_path / "config/settings.json").read_text())
@@ -39,18 +41,24 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch,
     truth = pd.concat([pd.DataFrame({"date": dates, "location": loc, "target": target,
                                       "value": factor * (2 + np.sin(w / 8))})
                        for loc in ["01", "02", "US"] for target, factor in [(HOSP, 100), (ED, .005)]])
-    truth.to_csv(snapshot / "truth.csv", index=False)
-    pd.DataFrame({"date": dates.repeat(3), "location_name": ["Alabama", "Alaska", "US"] * len(dates),
-                  "scale_factor": 1.}).to_csv(snapshot / "ed-fractions.csv", index=False)
-    pd.DataFrame({"date": dates, NSSP: 1 + .5 * np.sin(w / 8),
-                   "available_date": dates + pd.Timedelta(weeks=1)}).to_csv(snapshot / "nssp.csv", index=False)
-    ww = pd.DataFrame({"date": dates, WW: np.sin(w / 8) - 3,
-                       "available_date": dates + pd.Timedelta(weeks=2)})
+    nssp = pd.DataFrame({"date": dates, NSSP: 1 + .5 * np.sin(w / 8), "available_date": dates + pd.Timedelta(weeks=1)})
+    ww = pd.DataFrame({"date": dates, WW: np.sin(w / 8) - 3, "available_date": dates + pd.Timedelta(weeks=2)})
     for lag in [1, 2, 4]:
         ww[f"{WW}_lag{lag}"] = ww[WW].shift(lag)
+    if mutate:
+        truth, nssp, ww = mutate(truth.reset_index(drop=True), nssp, ww)
+    truth.to_csv(snapshot / "truth.csv", index=False)
+    nssp.to_csv(snapshot / "nssp.csv", index=False)
     ww.to_csv(snapshot / "wastewater.csv", index=False)
     write_json(snapshot / "manifest.json", {"files": {str(p.relative_to(snapshot)): digest(p)
                 for p in snapshot.rglob("*") if p.is_file()}})
+    return settings, snapshot
+
+
+@pytest.mark.parametrize("with_ordinal", [False, True])
+def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch, with_ordinal):
+    """Exercise orchestration, serializers and guards in a separate project directory."""
+    settings, snapshot = synthetic_project(root, tmp_path, with_ordinal=with_ordinal)
     run = run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
     settings["component_workers"] = 2
     write_json(tmp_path / "config/settings.json", settings)
@@ -59,7 +67,12 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch,
         assert path.read_bytes() == (parallel_run / path.relative_to(run)).read_bytes()
     manifest = verify_run(tmp_path, run)
     assert manifest["validation"]["MIGHTE-Base"]["rows"] == 3 * 2 * 4 * 23 + (3 * 4 * 5 if with_ordinal else 0)
-    assert len(manifest["output_hashes"]) == 3
+    assert len(manifest["output_hashes"]) == 3 and manifest["notices"] == []
+    # ED training history: ILINet proxy through June 2021, observed from 2022, and an unfilled gap between.
+    ed = pd.read_csv(run / "ed-training.csv", parse_dates=["date"])
+    alabama = ed[ed.location_name.eq("Alabama")].set_index("date").total_hosp
+    assert alabama.loc[:"2021-06-26"].notna().all() and alabama.loc["2021-07-03":"2022-05-28"].isna().all()
+    assert alabama.loc["2022-06-04":].notna().all()
     for model in ["MIGHTE-Linear", "MIGHTE-Nsemble"]:
         assert manifest["validation"][model]["targets"] == [HOSP]
     if with_ordinal:
@@ -92,6 +105,73 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch,
     path.write_text(path.read_text().replace(",quantile,", ",changed,", 1))
     with pytest.raises(ValueError, match="edited after validation"):
         verify_run(tmp_path, run)
+
+
+def locations(run, model, target):
+    frame = read_forecast(run / f"model-output/{model}/2026-10-10-{model}.csv")
+    return {h: set(g.location) for h, g in frame[frame.target.eq(target)].groupby("horizon")}
+
+
+@pytest.mark.parametrize("scenario", ["location", "nssp_stale", "nssp_missing", "ww_missing", "ed_release", "plausibility"])
+def test_missing_inputs_omit_only_dependent_outputs(root, tmp_path, scenario):
+    week = pd.Timedelta(weeks=1)
+
+    def mutate(truth, nssp, ww):
+        if scenario == "location":
+            truth = truth[~(truth.target.eq(HOSP) & truth.location.eq("US") & truth.date.eq(ANCHOR))]
+        if scenario in {"nssp_stale", "ed_release"}:
+            nssp = nssp[nssp.date.lt(ANCHOR)]
+        if scenario == "ed_release":
+            truth = truth[~(truth.target.eq(ED) & truth.date.eq(ANCHOR))]
+        if scenario == "nssp_missing":
+            nssp = nssp[nssp.date.lt(ANCHOR - week)]
+        if scenario == "ww_missing":
+            ww = ww[ww.date.lt(ANCHOR - 2 * week)]
+        if scenario == "plausibility":
+            alaska = truth.target.eq(ED) & truth.location.eq("02")
+            truth.loc[alaska, "value"] = .28 + .01 * np.sin(np.arange(alaska.sum()) / 8)
+        return truth, nssp, ww
+
+    _, snapshot = synthetic_project(root, tmp_path, mutate=mutate)
+    run = run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
+    manifest = verify_run(tmp_path, run)
+    models, notices = manifest["models"], " | ".join(manifest["notices"])
+    everywhere = {h: {"01", "02", "US"} for h in range(4)}
+    if scenario == "location":
+        assert models == ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]
+        assert "no 2026-10-03 value for US; omitted for those locations" in notices
+        for model in models:
+            assert locations(run, model, HOSP) == {h: {"01", "02"} for h in range(4)}
+        assert locations(run, "MIGHTE-Base", ED) == everywhere
+        assert locations(run, "MIGHTE-Base", TREND) == {h: {"01", "02"} for h in range(4)}
+    if scenario == "nssp_stale":
+        assert models == ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]
+        assert "used 2026-09-26" in notices
+    if scenario == "nssp_missing":
+        assert models == ["MIGHTE-Base", "MIGHTE-Linear"]
+        assert manifest["validation"]["MIGHTE-Base"]["targets"] == [ED]
+        assert "National NSSP covariate missing" in notices and "Not produced this week: MIGHTE-Nsemble" in notices
+        assert "without hospital admissions, hospitalization trends" in notices
+    if scenario == "ww_missing":
+        assert models == ["MIGHTE-Linear"] and "WastewaterSCAN covariate missing" in notices
+    if scenario == "ed_release":
+        assert models == ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]
+        assert set(manifest["validation"]["MIGHTE-Base"]["targets"]) == {HOSP, TREND}
+        assert "ED visits: no 2026-10-03 values released" in notices and "used 2026-09-26" in notices
+    if scenario == "plausibility":
+        assert models == ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]
+        assert all("02" not in found for found in locations(run, "MIGHTE-Base", ED).values())
+        assert "removed Alaska" in notices and "plausibility" in notices
+        assert locations(run, "MIGHTE-Base", HOSP) == everywhere
+
+
+def test_run_without_any_producible_forecast_fails_loudly(root, tmp_path):
+    def mutate(truth, nssp, ww):
+        return truth[truth.date.lt(ANCHOR)], nssp, ww
+
+    _, snapshot = synthetic_project(root, tmp_path, with_ordinal=False, mutate=mutate)
+    with pytest.raises(ValueError, match="No forecasts could be produced"):
+        run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
 
 
 def test_select_submitted_run_without_double_counting(tmp_path):

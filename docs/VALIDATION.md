@@ -6,11 +6,9 @@ Verified September 25, 2026. These checks establish implementation behavior; the
 
 Original and standalone feature tables and predictions were compared on a deterministic, nondegenerate synthetic three-location history in the pinned environment. The maximum absolute prediction difference was 0.0 for both the distributional LightGBM fit and partially pooled autoregression. Golden forecasts from the original implementation are committed under `tests/fixtures/`; tests need no access to the original repository. Linux CI retains a strict numerical tolerance. The initial CI failure was traced to a symmetric synthetic fixture and resolved by using a deterministic, more varied fixture, without relaxing the tolerance or changing the model.
 
-## Historical training adjustment
+## Historical training data
 
-An independent base-R implementation checked the original pooled regression and legacy adjustment equations against the standalone implementation using the September 25 input snapshot. The original regression coefficients agreed to floating-point precision. All 39,160 hospitalization training values matched exactly; 53 location-specific shifts agreed within 4.8e-16, with identical calibration counts. CSV parsing preserves the stored ED fractions exactly before count rounding. Raw observed truth is unchanged.
-
-The operational pipeline fills internal training gaps linearly and records their count. This check uses that documented interpolation policy; it does not claim that linear interpolation reproduces the earlier R spline interpolation. Latest anchors are never extrapolated.
+Since September 26, 2026 the hospitalization history is the ILINet/FluSurv proxy seed followed by NHSN counts as reported; the earlier ED-share scaling and legacy multiplier were removed (see [DATA.md](DATA.md)). Internal gaps are filled linearly and counted; latest anchors are never extrapolated.
 
 ## Workflow and scoring
 

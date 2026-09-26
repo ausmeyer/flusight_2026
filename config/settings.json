@@ -64,8 +64,7 @@
     "note": "Both panel AR models directly predict log1p(y[t+h])-log1p(y[t]) from features ending at t. The latest one-week difference is log1p(y[t])-log1p(y[t-1]), and integration begins from y[t] only."
   },
   "ed_history": {
-    "mode": "observed",
-    "historical_nssp_file": null
+    "mode": "ilinet_proxy"
   },
   "ed_target_transform": {
     "name": "logit",

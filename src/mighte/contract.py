@@ -79,7 +79,7 @@ class Contract:
         if not expected.eq(pd.to_datetime(df.target_end_date)).all():
             raise ValueError("target_end_date must equal reference_date + 7*horizon")
         allowed = {HOSP, ED, TREND} if model == "MIGHTE-Base" else {HOSP}
-        if not set(df.target) <= allowed or HOSP not in set(df.target):
+        if not set(df.target) <= allowed:
             raise ValueError(f"Incorrect targets for {model}")
         df["value"] = pd.to_numeric(df.value, errors="raise")
         if not np.isfinite(df.value).all() or (df.value < 0).any():
@@ -118,6 +118,13 @@ class Contract:
                 raise ValueError("ED quantile exceeds the hub's 0.25 plausibility bound; inspect the fit")
         return {"rows": len(df), "targets": sorted(df.target.unique()),
                 "locations": df.groupby("target").location.nunique().to_dict(), "valid": True}
+
+    def implausible_units(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """Units the hub's plausibility checks flag: ED above 0.25, admissions above 30% of population."""
+        df = frame[frame.output_type.eq("quantile")]
+        limit = np.where(df.target.eq(ED), .25,
+                         np.where(df.target.eq(HOSP), df.location.map(self.population).astype(float) * .30, np.inf))
+        return df.loc[pd.to_numeric(df.value).to_numpy() > limit, ["target", "location", "horizon"]].drop_duplicates()
 
     def validate_metadata(self, directory: Path, *, models=MODELS) -> list[dict]:
         schema = json.loads((self.directory / "model-metadata-schema.json").read_text())

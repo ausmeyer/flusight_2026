@@ -47,9 +47,10 @@ def distributional(history: pd.DataFrame, snapshot: Path, reference: str, settin
                                       shifted=target == HOSP or settings["ed_history"]["mode"] != "observed")
     train = pooled[(pooled.target_date <= anchor) & (pooled.date <= anchor)].copy()
     train = train.dropna(subset=["total_hosp", "target"]).reset_index(drop=True)
-    test = pooled[pooled.date.eq(anchor)].reset_index(drop=True)
-    if len(train) < runtime.min_train_rows or test.empty or test.total_hosp.isna().any():
-        raise ValueError(f"Insufficient training data or missing forecast anchor: {component}")
+    # Forecast only locations with an observed anchor; others keep their history for training.
+    test = pooled[pooled.date.eq(anchor) & pooled.total_hosp.notna()].reset_index(drop=True)
+    if len(train) < runtime.min_train_rows or test.empty:
+        raise ValueError(f"Insufficient training data or no observed forecast anchor: {component}")
     transform = None
     if target == ED:
         epsilon = boundary_epsilon(settings["ed_target_transform"])
@@ -148,7 +149,8 @@ def equal_quantiles(components: list[pd.DataFrame]) -> pd.DataFrame:
     return ((series[0] + series[1] + series[2]) / 3).rename("value").reset_index()[COLUMNS]
 
 
-def persistence_baseline(history: pd.DataFrame, reference: str, target: str, location_map: dict) -> pd.DataFrame:
+def persistence_baseline(history: pd.DataFrame, reference: str, target: str, location_map: dict,
+                         locations) -> pd.DataFrame:
     """Local comparison baseline: zero-centered, symmetric historical weekly changes.
 
     This is explicitly a local baseline, not the official FluSight-baseline.
@@ -157,6 +159,8 @@ def persistence_baseline(history: pd.DataFrame, reference: str, target: str, loc
     rows = []
     anchor = pd.Timestamp(reference) - pd.Timedelta(weeks=1)
     for name, group in history[history.date.le(anchor)].groupby("location_name"):
+        if location_map[name] not in set(locations):
+            continue
         values = group.sort_values("date").total_hosp
         increments = values.diff().dropna().tail(104).to_numpy()
         errors = np.concatenate([increments, -increments, [0.]])

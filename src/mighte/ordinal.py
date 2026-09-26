@@ -47,9 +47,10 @@ def fit_ordinal_bags(pooled, feature_cols, anchor, runtime, seed, population_map
     """Port of the study classifier, with the same season draws and tree settings."""
     train = pooled[(pooled.target_date <= anchor) & (pooled.date <= anchor)].dropna(
         subset=["total_hosp", "target"]).copy()
-    test = pooled[(pooled.date == anchor) & (pooled.horizon_weeks <= runtime.max_horizons)].copy()
-    if len(train) < runtime.min_train_rows or test.empty or test.total_hosp.isna().any():
-        raise ValueError("Insufficient ordinal training data or missing forecast anchor")
+    test = pooled[(pooled.date == anchor) & (pooled.horizon_weeks <= runtime.max_horizons)
+                  & pooled.total_hosp.notna()].copy()
+    if len(train) < runtime.min_train_rows or test.empty:
+        raise ValueError("Insufficient ordinal training data or no observed forecast anchor")
     populations = train.location_name.map(population_map).to_numpy()
     labels = category_labels(train.target, train.total_hosp, populations, train.horizon_weeks - 1)
     seasons = sorted(train.season.dropna().unique())
