@@ -8,7 +8,7 @@ version = "2026.1.0"
 description = "Standalone prospective MIGHTE forecasts for CDC FluSight"
 requires-python = ">=3.11,<3.13"
 dependencies = [
-  "numpy==1.26.4", "pandas==2.2.3", "scipy==1.14.1", "lightgbm==4.6.0",
+  "numpy==1.26.3", "pandas==2.1.4", "scipy==1.11.4", "lightgbm==4.2.0",
   "requests==2.32.4", "PyYAML==6.0.2", "jsonschema==4.26.0",
   "plotly==6.3.0", "threadpoolctl==3.6.0"
 ]
