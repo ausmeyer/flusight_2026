@@ -125,15 +125,19 @@ def choose_truth(sources: list[tuple[str, pd.DataFrame, str]], target: str):
 
 
 def wastewater_weekly(raw: pd.DataFrame) -> pd.DataFrame:
-    """Same equal-site median, log transform and lag block as the selected study."""
+    """Equal-site mean of within-site weekly median log10 concentrations, with the study's lag block.
+
+    The mean rises as soon as some sites detect influenza A; an equal-site median stays at the
+    non-detect floor until more than half do.
+    """
     raw = raw.copy()
     dates = pd.to_datetime(raw.sample_collect_date).dt.normalize()
     raw["date"] = dates + pd.to_timedelta((5 - dates.dt.weekday) % 7, unit="D")
     concentration = pd.to_numeric(raw.pcr_target_mic_lin, errors="coerce")
     raw[WW] = np.log10(concentration.where(concentration >= 0) + 1e-5)
     site = raw.groupby(["date", "site"])[WW].median().dropna().reset_index()
-    week = site.groupby("date")[WW].agg(["median", "count"]).reset_index()
-    week = week.rename(columns={"median": WW, "count": "site_count"})
+    week = site.groupby("date")[WW].agg(["mean", "count"]).reset_index()
+    week = week.rename(columns={"mean": WW, "count": "site_count"})
     week.loc[week.site_count < 10, WW] = np.nan
     week["available_date"] = week.date + pd.Timedelta(weeks=2)
     lookup = week.set_index("date")[WW]
