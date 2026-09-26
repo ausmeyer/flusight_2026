@@ -103,6 +103,7 @@ select{font:inherit;min-width:160px;border:1px solid #c5d2d9;border-radius:6px;p
 .checks{max-height:270px;overflow-y:auto}.checks label{display:flex;flex-direction:row;align-items:center;font-weight:500;padding:7px 0;gap:8px}.checks label[hidden]{display:none}.checks label:has(input:disabled){opacity:.45}.checks input{accent-color:#167f87;margin:0}.swatch{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .timeline{display:flex;gap:24px;align-items:end;margin-top:18px}.week-navigation{flex:1;min-width:0}.week-navigation>label{margin-bottom:7px}.week-slider{display:flex;align-items:center;gap:10px}.week-slider input{flex:1;min-width:0;accent-color:#167f87;cursor:ew-resize}.week-slider button{font:inherit;border:1px solid #c5d2d9;border-radius:6px;background:white;color:#213f50;width:34px;height:34px;cursor:pointer}.week-slider button:disabled{opacity:.35;cursor:default}
 #chart{width:100%;height:440px}.tablewrap{overflow-x:auto;margin-top:15px}table{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+#chart .hoverlayer .legendlines{display:none}
 th{text-align:right;padding:11px 10px;background:#f0f5f7;color:#46606e;font-size:11px}td{text-align:right;padding:12px 10px;border-top:1px solid #e4ecef}th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:white}
 .positive{color:#157267}.negative{color:#a24141}.empty{padding:30px;text-align:center;color:#6f808a}
 details{margin-top:14px;font-size:13px}summary{cursor:pointer;color:#396575}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f7f8;padding:16px;max-height:400px;overflow:auto;font-size:11px}
@@ -164,11 +165,11 @@ const begin=[start,shiftDate(references[0],-7)].sort()[0],end=[shiftDate(latest,
 const truth=observed.filter(r=>r.date>=begin&&r.date<=end);
 const comparison=D.forecasts.filter(r=>r.target===target&&r.location===loc&&chosen.includes(r.model_id));
 const ymax=Math.max(1e-6,...truth.map(r=>r.value*mult),...comparison.filter(r=>r.target_end_date>=begin&&r.target_end_date<=end).map(r=>r.hi95*mult));
-traces.push({x:truth.map(r=>r.date),y:truth.map(r=>r.value*mult),name:'Observed · revised',mode:'lines+markers',line:{color:'#253e4c',width:2},marker:{size:4}});
+traces.push({x:truth.map(r=>r.date),y:truth.map(r=>r.value*mult),name:'Observed · revised',mode:'lines+markers',line:{color:'#253e4c',width:2},marker:{size:6},hovertemplate:'Observed: %{y}<extra></extra>'});
 chosen.forEach(model=>{const rows=comparison.filter(r=>r.reference_date===ref&&r.model_id===model).sort((a,b)=>a.horizon-b.horizon);if(!rows.length)return;
 const c=colors[model]||'#658091',x=rows.map(r=>r.target_end_date);
 [['lo95','hi95',.08],['lo50','hi50',.15]].forEach(([lo,hi,a])=>{traces.push({x,y:rows.map(r=>r[lo]*mult),mode:'lines',line:{width:0},showlegend:false,hoverinfo:'skip',legendgroup:model});traces.push({x,y:rows.map(r=>r[hi]*mult),mode:'lines',line:{width:0},fill:'tonexty',fillcolor:rgba(c,a),showlegend:false,hoverinfo:'skip',legendgroup:model})});
-traces.push({x,y:rows.map(r=>r.median*mult),mode:'lines+markers',name:model,legendgroup:model,line:{color:c,width:2.5},marker:{size:6}})});
+traces.push({x,y:rows.map(r=>r.median*mult),mode:'lines+markers',name:model,legendgroup:model,line:{color:c,width:2.5},marker:{size:8},hovertemplate:`${esc(model.replace(/^MIGHTE-/,''))}: %{y}<extra></extra>`})});
 Plotly.react('chart',traces,{margin:{t:25,b:45,l:65,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},uirevision:[target,loc,history,...chosen].join('|'),xaxis:{type:'date',range:[begin,end],gridcolor:'#edf1f3'},yaxis:{title:{text:mult===100?'Influenza ED visits (%)':'Hospital admissions'},range:[0,ymax*1.08],gridcolor:'#edf1f3'},legend:{orientation:'h',y:1.14,maxheight:.25},hovermode:'x unified',shapes:[{type:'line',x0:ref,x1:ref,y0:0,y1:1,yref:'paper',line:{color:'#95a7ae',dash:'dot',width:1}}]},{responsive:true,displaylogo:false});
 table();}
 const mean=rows=>rows.length?rows.reduce((a,b)=>a+b,0)/rows.length:null;
