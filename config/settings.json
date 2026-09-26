@@ -71,7 +71,7 @@
     "name": "logit",
     "boundary_epsilon": 0.00005
   },
-  "ordinal_plugin": null,
+  "ordinal_plugin": "mighte.ordinal:predict",
   "threads": 4,
   "component_workers": 2
 }

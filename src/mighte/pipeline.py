@@ -142,18 +142,35 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
         if not module.startswith("mighte."):
             raise ValueError("Keep ordinal plugin code inside this standalone mighte package")
         fn = getattr(importlib.import_module(module), name)
-        ordinal = fn({"reference_date": reference, "snapshot_path": snapshot,
-                      "hospitalization_history": histories[HOSP].copy(),
-                      "base_hospitalization_quantiles": base_hosp.copy(), "settings": settings})
+        ordinal_path = components / "base-ordinal.csv"
+        ordinal_checkpoint = run / "checkpoints/base-ordinal"
+        if not ordinal_path.exists():
+            # Use the identical serialized history consumed by the boosted Base fit.
+            ordinal_history = pd.read_csv(run / "hospitalization-training.csv", parse_dates=["date"])
+            with threadpool_limits(limits=int(settings["threads"])):
+                ordinal = fn({"reference_date": reference, "snapshot_path": snapshot,
+                              "hospitalization_history": ordinal_history,
+                              "base_hospitalization_quantiles": base_hosp.copy(), "settings": settings,
+                              "checkpoint_path": ordinal_checkpoint})
+            if ordinal.empty or set(ordinal.columns) != set(COLUMNS):
+                raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
+            write_forecast(ordinal_path, ordinal)
+        ordinal = read_forecast(ordinal_path)
         if ordinal.empty or set(ordinal.target) != {TREND} or set(ordinal.columns) != set(COLUMNS):
             raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
         forecasts["MIGHTE-Base"] = pd.concat([forecasts["MIGHTE-Base"], ordinal], ignore_index=True)
+        if (ordinal_checkpoint / "fit.json").exists():
+            audit["ordinal"] = json.loads((ordinal_checkpoint / "fit.json").read_text())
+            write_json(run / "data-audit.json", audit)
     validation = {}
     for model, frame in forecasts.items():
         hosp = frame.target.eq(HOSP)
         frame.loc[hosp, "value"] = np.rint(frame.loc[hosp, "value"])
-        for target in [HOSP, ED] if model == "MIGHTE-Base" else [HOSP]:
-            expected = set(audit[target]["locations"])
+        targets = [HOSP, ED] if model == "MIGHTE-Base" else [HOSP]
+        if model == "MIGHTE-Base" and settings.get("ordinal_plugin"):
+            targets.append(TREND)
+        for target in targets:
+            expected = set(audit[HOSP if target == TREND else target]["locations"])
             for horizon in range(4):
                 actual = set(frame.loc[frame.target.eq(target) & frame.horizon.eq(horizon), "location"])
                 if actual != expected:

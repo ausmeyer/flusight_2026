@@ -10,12 +10,14 @@ import numpy as np
 import pandas as pd
 import requests
 
-from .contract import CATEGORIES, ED, HOSP, MODELS, QUANTILES, TREND, UNIT, check_window, read_forecast
+from .contract import CATEGORIES, ED, HOSP, MODELS, QUANTILES, TREND, UNIT, Contract, check_window, read_forecast
 from .data import API, HUB
+from .ordinal import category_labels, validate_probabilities
 from .pipeline import verify_run
 from .util import digest, utc_now, write_json
 
 LOCAL_BASELINE = "Local-persistence"
+TREND_BASELINE = "FluSight-baseline_cat"
 BENCHMARKS = ("FluSight-baseline", "FluSight-ensemble", "UMass-flusion", "Google_SAI-FluEns")
 
 
@@ -82,7 +84,11 @@ def load_archive(root: Path) -> pd.DataFrame:
         manifest = verify_run(root, run)
         for filename in manifest["output_hashes"]:
             path = run / filename
-            frames.append(read_forecast(path).assign(model_id=path.parent.name))
+            frame = read_forecast(path).assign(model_id=path.parent.name)
+            if frame.target.eq(TREND).any():
+                contract = Contract(root / "data/snapshots" / manifest["snapshot_id"] / "contract")
+                frame["population"] = frame.location.map(contract.population)
+            frames.append(frame)
         frames.append(read_forecast(run / "local-baseline.csv").assign(model_id=LOCAL_BASELINE))
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
@@ -130,8 +136,9 @@ def fetch_benchmarks(root: Path, references: list[str], *, online=True, catalog=
                 if not path.exists():
                     continue
             frame = read_forecast(path)
-            frame = frame[frame.target.isin([HOSP, ED]) & frame.horizon.isin([0, 1, 2, 3])
-                          & frame.output_type.eq("quantile")]
+            supported = ((frame.target.isin([HOSP, ED]) & frame.output_type.eq("quantile"))
+                         | (frame.target.eq(TREND) & frame.output_type.eq("pmf")))
+            frame = frame[supported & frame.horizon.isin([0, 1, 2, 3])]
             if not frame.empty:
                 frames.append(frame.assign(model_id=model))
             status.append({"model": model, "reference_date": reference, "status": state})
@@ -147,6 +154,8 @@ def score_quantiles(forecasts: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFram
     if forecasts.empty:
         return pd.DataFrame()
     frame = forecasts[forecasts.output_type.eq("quantile")].copy()
+    if frame.empty:
+        return pd.DataFrame()
     frame["output_type_id"] = pd.to_numeric(frame.output_type_id)
     keys = ["model_id", *UNIT]
     if frame.duplicated(keys + ["output_type_id"]).any():
@@ -170,6 +179,51 @@ def score_quantiles(forecasts: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFram
     scored["bias"] = scored[.5] - y
     for coverage, lo, hi in [(50, .25, .75), (80, .1, .9), (95, .025, .975)]:
         scored[f"coverage_{coverage}"] = ((y >= scored[lo]) & (y <= scored[hi])).astype(float)
+    return scored
+
+
+def score_categories(forecasts: pd.DataFrame, truth: pd.DataFrame, population: dict) -> pd.DataFrame:
+    """Score five-class PMFs against observed admissions at both required weeks."""
+    if forecasts.empty:
+        return pd.DataFrame()
+    frame = forecasts[forecasts.target.eq(TREND) & forecasts.output_type.eq("pmf")].copy()
+    if frame.empty:
+        return pd.DataFrame()
+    keys = ["model_id", *UNIT]
+    if frame.duplicated(keys + ["output_type_id"]).any():
+        raise ValueError("Duplicate categorical forecasts would inflate accuracy denominators")
+    if not frame.output_type_id.isin(CATEGORIES).all():
+        raise ValueError("Unknown hospitalization trend category")
+    matrix = frame.pivot(index=keys, columns="output_type_id", values="value").reindex(
+        columns=CATEGORIES).dropna().reset_index()
+    if "population" in frame:
+        matrix = matrix.merge(frame[keys + ["population"]].drop_duplicates(), on=keys,
+                              validate="one_to_one")
+        matrix["population"] = matrix.population.fillna(matrix.location.map(population))
+    else:
+        matrix["population"] = matrix.location.map(population)
+    matrix["baseline_date"] = (pd.to_datetime(matrix.reference_date) - pd.Timedelta(weeks=1)).dt.strftime("%Y-%m-%d")
+    observed = truth[truth.target.eq(HOSP)][["location", "date", "value"]]
+    scored = matrix.merge(observed.rename(columns={"date": "target_end_date", "value": "truth"}),
+                           on=["location", "target_end_date"], validate="many_to_one").merge(
+        observed.rename(columns={"date": "baseline_date", "value": "baseline_truth"}),
+        on=["location", "baseline_date"], validate="many_to_one").dropna(subset=["truth", "baseline_truth"])
+    if scored.empty:
+        return scored
+    p = scored[CATEGORIES].to_numpy(float)
+    validate_probabilities(p)
+    y = category_labels(scored.truth, scored.baseline_truth, scored.population, scored.horizon)
+    observed_class = np.eye(len(CATEGORIES))[y]
+    tie_order = np.array([2, 1, 3, 0, 4])
+    predicted = tie_order[np.argmax(p[:, tie_order], axis=1)]
+    observed_p = p[np.arange(len(y)), y]
+    scored["truth_class"], scored["predicted_class"] = y, predicted
+    scored["rps"] = np.square(np.cumsum(p, axis=1)[:, :-1] - np.cumsum(observed_class, axis=1)[:, :-1]).sum(axis=1)
+    scored["brier"] = np.square(p - observed_class).sum(axis=1)
+    scored["log_score"] = -np.log(np.maximum(observed_p, 1e-15))
+    scored["zero_observed_probability"] = (observed_p == 0).astype(float)
+    scored["accuracy"] = (predicted == y).astype(float)
+    scored["absolute_category_error"] = abs(predicted - y)
     return scored
 
 
@@ -203,6 +257,8 @@ def summarize(scored: pd.DataFrame, *, baseline=LOCAL_BASELINE, location="states
         return pd.DataFrame()
     work = scored.copy()
     if location == "states":
+        work = work[~work.location.isin(["US", "72"])]
+    elif location == "states_pr":
         work = work[work.location.ne("US")]
     elif location != "all":
         work = work[work.location.eq(location)]
@@ -210,6 +266,18 @@ def summarize(scored: pd.DataFrame, *, baseline=LOCAL_BASELINE, location="states
         work = work[work.horizon.eq(int(horizon))]
     records = []
     for target, target_group in work.groupby("target"):
+        if target == TREND:
+            trend_baseline = TREND_BASELINE if baseline == LOCAL_BASELINE else baseline
+            base = target_group[target_group.model_id.eq(trend_baseline)][UNIT + ["rps"]]
+            for model, g in target_group.groupby("model_id"):
+                pair = g.merge(base, on=UNIT, suffixes=("", "_baseline"), validate="one_to_one")
+                den = pair.rps_baseline.sum()
+                relative = float(pair.rps.sum() / den) if len(pair) and den > 0 else np.nan
+                records.append({"target": target, "model_id": model, "n": len(g), "matched_n": len(pair),
+                                **{metric: g[metric].mean() for metric in ["rps", "brier", "log_score", "accuracy",
+                                      "absolute_category_error", "zero_observed_probability"]},
+                                "relative_rps": relative, "rps_skill": 1 - relative})
+            continue
         raw_relative = relative_scores(target_group, "wis", baseline)
         log_relative = relative_scores(target_group, "wis_log1p", baseline)
         base = target_group[target_group.model_id.eq(baseline)][UNIT + ["wis", "wis_log1p", "ae"]]
@@ -236,6 +304,10 @@ def evaluate(root: Path, snapshot: Path, *, online=True, comparison_references=(
     benchmarks, status = fetch_benchmarks(root, references, online=online, catalog=catalog)
     scoring_archive = archive
     if not benchmarks.empty:
+        if not archive.empty and "population" in archive:
+            populations = archive[["reference_date", "location", "population"]].dropna().drop_duplicates()
+            benchmarks = benchmarks.merge(populations, on=["reference_date", "location"], how="left",
+                                           validate="many_to_one")
         # A peer forecast can be displayed for a rehearsal, but only genuine
         # prospective MIGHTE weeks contribute to the accuracy comparison.
         eligible = benchmarks[benchmarks.reference_date.isin(prospective)]
@@ -243,4 +315,8 @@ def evaluate(root: Path, snapshot: Path, *, online=True, comparison_references=(
         archive = pd.concat([archive, benchmarks], ignore_index=True)
     truth = pd.read_csv(snapshot / "truth.csv", dtype={"location": str})
     scores = score_quantiles(scoring_archive, truth)
+    if not scoring_archive.empty and scoring_archive.target.eq(TREND).any():
+        categorical = score_categories(scoring_archive, truth, Contract(snapshot / "contract").population)
+        scores = pd.concat([f for f in [scores, categorical] if not f.empty], ignore_index=True) if (
+            not scores.empty or not categorical.empty) else pd.DataFrame()
     return scores, status, archive

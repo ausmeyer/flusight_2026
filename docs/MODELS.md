@@ -18,6 +18,10 @@ MIGHTE-Base hospitalization, the wastewater-only component and the NSSP-only com
 
 The operational port matches target observations by exact calendar date, and inputs are reindexed to complete weekly grids before constructing lags. It rejects in-sample fallback when out-of-fold spread fitting cannot be completed. These are operational checks; on complete, supported inputs the original numerical fit is unchanged. Regression fixtures compare both feature tables and forecasts directly with the original implementation.
 
+## MIGHTE-Base-Ordinal
+
+A separate pooled five-class LightGBM classifier supplies the hospitalization rate-change probabilities within the MIGHTE-Base submission. It uses the same hospitalization, seasonality, wastewater level/lags 1, 2, 4 and national NSSP level/lags 1, 2, 4 feature table as Base, with identical source availability rules. Each of 100 season-resampled fits minimizes multiclass log loss for 250 boosting rounds. Final probabilities are the arithmetic mean across fits. This component does not use or categorize Base's quantitative forecasts. See [ORDINAL.md](ORDINAL.md) for the label construction and audit.
+
 ## MIGHTE-Linear
 
 Direct partially pooled Gaussian autoregression of log1p changes. Shared features include origin log level; differences at 1, 2, 3, 4, 8, 12, 26, 52 weeks; rolling moments; cross-state hospitalization summaries; seasonal harmonics and regime indicators. The mean design includes location intercepts, horizon interactions and ridge-shrunk state deviations for current level and the two most recent differences. A linear log-scale model uses current level, absolute change, rolling spread, national spread, horizon and season indicators. Five coordinate iterations alternate penalized mean and scale fits, followed by a final scale fit. All penalties and iteration limits are preserved in `config/settings.json`. No June–August exclusion or new recalibration is introduced.

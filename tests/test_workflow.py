@@ -6,10 +6,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mighte.contract import CATEGORIES, ED, HOSP, TREND, UNIT, read_forecast
+from mighte.contract import ED, HOSP, TREND, UNIT, read_forecast
 from mighte.data import NSSP, WW
 from mighte.evaluate import load_archive, prospective_runs
 from mighte.pipeline import run_forecasts, verify_run
+from mighte.report import build_report
 from mighte.submit import create_pr
 from mighte.util import digest, write_json
 
@@ -24,17 +25,7 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch,
     settings["panel_ar_runtime"]["min_train_rows"] = 100
     settings["threads"] = 2
     settings["component_workers"] = 1
-    if with_ordinal:
-        from mighte import ordinal
-
-        def fixture_ordinal(context):
-            assert context["hospitalization_history"].date.max() == pd.Timestamp("2026-10-03")
-            units = context["base_hospitalization_quantiles"][UNIT].drop_duplicates()
-            return pd.concat([units.assign(target=TREND, output_type="pmf", output_type_id=c, value=.2)
-                              for c in CATEGORIES], ignore_index=True)
-
-        monkeypatch.setattr(ordinal, "predict", fixture_ordinal)
-        settings["ordinal_plugin"] = "mighte.ordinal:predict"
+    settings["ordinal_plugin"] = "mighte.ordinal:predict" if with_ordinal else None
     write_json(tmp_path / "config/settings.json", settings)
     snapshot = tmp_path / "data/snapshots/test-snapshot"
     shutil.copytree(root / "hub-contract", snapshot / "contract")
@@ -73,9 +64,29 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch,
         assert manifest["validation"][model]["targets"] == [HOSP]
     if with_ordinal:
         assert TREND in manifest["validation"]["MIGHTE-Base"]["targets"]
+        probabilities = read_forecast(run / "components/base-ordinal.csv")
+        np.testing.assert_allclose(probabilities.groupby(UNIT).value.sum(), 1, rtol=0, atol=1e-8)
+        assert not np.allclose(probabilities.value, .2)  # Real classifier, not a plugin stub.
     with pytest.raises(ValueError, match="cannot be submitted"):
         verify_run(tmp_path, run, for_submission=True)
     assert load_archive(tmp_path).empty
+    write_json(tmp_path / "data/latest.json", {"snapshot_id": snapshot.name})
+    report = build_report(tmp_path, run, online=False)
+    payload = json.loads((report.parent / "report-data.json").read_text())
+    assert payload["scores"] == []  # Report generation never scores a preview.
+    assert len(payload["categorical_forecasts"]) == (12 if with_ordinal else 0)
+    if with_ordinal:
+        for unit in payload["categorical_forecasts"]:
+            assert sum(unit[c] for c in ["large_decrease", "decrease", "stable", "increase", "large_increase"]) == pytest.approx(1)
+        # An interrupted run with an incomplete cached categorical component must fail.
+        cached = parallel_run / "components/base-ordinal.csv"
+        incomplete = read_forecast(cached)
+        incomplete[incomplete.location.ne("02") | incomplete.horizon.ne(0)].to_csv(cached, index=False)
+        interrupted = json.loads((parallel_run / "manifest.json").read_text())
+        interrupted["status"] = "running"
+        write_json(parallel_run / "manifest.json", interrupted)
+        with pytest.raises(ValueError, match="Incomplete forecast coverage.*rate change"):
+            run_forecasts(tmp_path, "2026-10-10", resume=parallel_run)
     # Verify mutations to the actual exported artifact are caught.
     path = run / next(iter(manifest["output_hashes"]))
     path.write_text(path.read_text().replace(",quantile,", ",changed,", 1))

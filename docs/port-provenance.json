@@ -25,5 +25,14 @@
     "lightgbmlss_stage2_params": "6a6236eb0b9cf96707057fb28c4e668d61e551b576c63909a4b732ca62b9af77"
   },
   "joint_model_sha256": "043d9336eabda91431516bf354989aab57d8076f8c6f79ab597e832272025f21",
-  "study_config_sha256": "419d5f86786633222e399580d41ac1843621b471aea72359919cd8ecce5ec42e"
+  "study_config_sha256": "419d5f86786633222e399580d41ac1843621b471aea72359919cd8ecce5ec42e",
+  "ordinal": {
+    "comparison": "Original study fit_ordinal_bags vs prospective predict on the shared Base feature table",
+    "config_sha256": "e239617fd27c343830e0524de97848252afb605b120c1ac2faca166527076b27",
+    "golden_sha256": "26a33d140f8bdd9a85a6419176de60b40307bef05b06c06e6d4dccdcf99a252d",
+    "maximum_absolute_difference": 0.0,
+    "population_fixture": 1000000,
+    "source": "scripts/categorical_model.py",
+    "source_sha256": "0bf15b71f2f48591290c47300b2de74ecd516f1e818925280dd82e2760ff511a"
+  }
 }

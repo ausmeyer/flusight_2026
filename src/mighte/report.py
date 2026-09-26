@@ -9,9 +9,9 @@ from pathlib import Path
 import pandas as pd
 from plotly.offline import get_plotlyjs
 
-from .contract import HOSP, UNIT, Contract, read_forecast
+from .contract import CATEGORIES, HOSP, TREND, UNIT, Contract, read_forecast
 from .data import latest_snapshot, verify_snapshot
-from .evaluate import LOCAL_BASELINE, discover_benchmarks, evaluate, summarize
+from .evaluate import LOCAL_BASELINE, TREND_BASELINE, discover_benchmarks, evaluate, summarize
 from .pipeline import verify_run
 from .util import digest, utc_now, write_json
 
@@ -56,15 +56,20 @@ def build_report(root: Path, run: Path, *, online=True) -> Path:
     quantiles = quantiles[quantiles.output_type_id.isin([.025, .25, .5, .75, .975])]
     chart = quantiles.pivot(index=["model_id", *UNIT], columns="output_type_id", values="value").reset_index()
     chart = chart.rename(columns={.025: "lo95", .25: "lo50", .5: "median", .75: "hi50", .975: "hi95"})
+    categorical = forecasts[forecasts.target.eq(TREND) & forecasts.output_type.eq("pmf")]
+    category_chart = categorical.pivot(index=["model_id", *UNIT], columns="output_type_id", values="value").reindex(
+        columns=CATEGORIES).dropna().reset_index() if not categorical.empty else pd.DataFrame()
     truth = pd.read_csv(snapshot / "truth.csv", dtype={"location": str})
     locations = pd.read_csv(snapshot / "contract/locations.csv", dtype={"location": str})
     payload = {"manifest": manifest, "generated_at": utc_now(), "truth_snapshot": snapshot.name,
                "data_audit": json.loads((run / "data-audit.json").read_text()),
                "forecasts": records(chart), "truth": records(truth[["date", "target", "location", "value"]]),
-               "scores": records(scores.drop(columns=[c for c in scores.columns if isinstance(c, float)], errors="ignore")),
+               "categorical_forecasts": records(category_chart), "categories": CATEGORIES,
+               "scores": records(scores.drop(columns=[c for c in scores.columns if isinstance(c, float) or c in CATEGORIES], errors="ignore")),
                "locations": records(locations[["location", "location_name"]]),
                "benchmarks": [catalog_status, *benchmark_status],
                "comparison_models": comparison_models, "baseline_models": [LOCAL_BASELINE, *comparison_models],
+               "trend_baseline": TREND_BASELINE,
                "default_models": ["MIGHTE-Base"],
                "model_colors": {m: model_color(m) for m in set(forecasts.model_id) | set(comparison_models)}}
     output = root / "reports" / manifest["run_id"]
@@ -102,6 +107,7 @@ select{font:inherit;min-width:160px;border:1px solid #c5d2d9;border-radius:6px;p
 .model-actions button{font:inherit;color:#216b75;border:1px solid #c5d2d9;border-radius:5px;background:white;padding:5px 9px;cursor:pointer}
 .checks{max-height:270px;overflow-y:auto}.checks label{display:flex;flex-direction:row;align-items:center;font-weight:500;padding:7px 0;gap:8px}.checks label[hidden]{display:none}.checks label:has(input:disabled){opacity:.45}.checks input{accent-color:#167f87;margin:0}.swatch{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .timeline{display:flex;gap:24px;align-items:end;margin-top:18px}.week-navigation{flex:1;min-width:0}.week-navigation>label{margin-bottom:7px}.week-slider{display:flex;align-items:center;gap:10px}.week-slider input{flex:1;min-width:0;accent-color:#167f87;cursor:ew-resize}.week-slider button{font:inherit;border:1px solid #c5d2d9;border-radius:6px;background:white;color:#213f50;width:34px;height:34px;cursor:pointer}.week-slider button:disabled{opacity:.35;cursor:default}
+.timeline>label[hidden]{display:none}
 #chart{width:100%;height:440px}.tablewrap{overflow-x:auto;margin-top:15px}table{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 #chart .hoverlayer .legendlines{display:none}
 th{text-align:right;padding:11px 10px;background:#f0f5f7;color:#46606e;font-size:11px}td{text-align:right;padding:12px 10px;border-top:1px solid #e4ecef}th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:white}
@@ -112,7 +118,7 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 </style></head><body><main>
 <div class="head"><div><div class="eyebrow">MIGHTE / FLUSIGHT 2026–27</div><h1>Weekly forecast review</h1></div><span id="status" class="badge"></span></div>
 <section class="card"><h2>Prospective forecasts</h2><div class="controls">
-<label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">Influenza ED visits</option></select></label>
+<label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">Influenza ED visits</option><option value="wk flu hosp rate change">Hospitalization trend</option></select></label>
 <label>Location<select id="location"></select></label>
 <div class="model-control"><span>Models</span><details id="model-picker" class="model-picker"><summary id="model-summary" aria-label="Models">1 selected</summary>
 <div class="model-panel"><input id="model-search" class="model-search" type="search" aria-label="Search models" placeholder="Search models">
@@ -139,25 +145,48 @@ const el=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=
 const options=(id,items)=>{el(id).innerHTML=items.map(([v,t])=>`<option value="${esc(v)}">${esc(t)}</option>`).join('')};
 el('status').textContent=D.manifest.preview?'PREVIEW · CANNOT SUBMIT':'VALIDATED · READY FOR REVIEW';
 el('status').classList.toggle('preview',D.manifest.preview);
-const references=[...new Set(D.forecasts.map(r=>r.reference_date))].sort();
+const TREND='wk flu hosp rate change',allForecasts=[...D.forecasts,...D.categorical_forecasts];
+const references=[...new Set(allForecasts.map(r=>r.reference_date))].sort();
 const seasonYear=Number(D.manifest.settings.season.split('-')[0]);
 options('reference',[...references].reverse().map(x=>[x,x]));el('reference').value=D.manifest.reference_date;
 el('week-slider').max=references.length-1;el('week-slider').disabled=references.length<2;
-options('location',D.locations.filter(x=>D.forecasts.some(r=>r.location===x.location)).sort((a,b)=>(b.location==='US')-(a.location==='US')||a.location_name.localeCompare(b.location_name)).map(x=>[x.location,x.location_name]));el('location').value='US';
+options('location',D.locations.filter(x=>allForecasts.some(r=>r.location===x.location)).sort((a,b)=>(b.location==='US')-(a.location==='US')||a.location_name.localeCompare(b.location_name)).map(x=>[x.location,x.location_name]));el('location').value='US';
 options('baseline',D.baseline_models.map(m=>[m,m]));
-const modelNames=[...new Set([...D.forecasts.map(r=>r.model_id),...D.comparison_models])].sort();
+const modelNames=[...new Set([...allForecasts.map(r=>r.model_id),...D.comparison_models])].sort();
 const colors=D.model_colors;
 el('models').innerHTML=modelNames.map(m=>`<label><input type="checkbox" value="${esc(m)}" ${D.default_models.includes(m)?'checked':''}><span class="swatch" aria-hidden="true" style="background:${colors[m]}"></span>${esc(m)}</label>`).join('');
 const selectedModels=()=>[...el('models').querySelectorAll('input:checked')].map(x=>x.value);
 const rgba=(hex,a)=>`rgba(${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)},${a})`;
 const shiftDate=(date,days)=>new Date(Date.parse(date)+days*86400000).toISOString().slice(0,10);
+function probabilityPlot(ref,loc,chosen){
+const rows=D.categorical_forecasts.filter(r=>r.reference_date===ref&&r.location===loc&&chosen.includes(r.model_id));
+const models=chosen.filter(m=>rows.some(r=>r.model_id===m)),n=Math.max(1,models.length),traces=[];
+const layout={margin:{t:45,b:45,l:125,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},annotations:[],showlegend:false};
+models.forEach((model,i)=>{const values=rows.filter(r=>r.model_id===model).sort((a,b)=>a.horizon-b.horizon),suffix=i?String(i+1):'',c=colors[model];
+const domain=[(n-i-1)/n+.05/n,(n-i)/n-.1/n];
+traces.push({type:'heatmap',x:values.map(r=>r.target_end_date),y:D.categories.map(c=>c.replaceAll('_',' ')),z:D.categories.map(c=>values.map(r=>r[c])),
+xaxis:'x'+suffix,yaxis:'y'+suffix,zmin:0,zmax:1,colorscale:[[0,'#f4f7f8'],[1,c]],showscale:false,xgap:4,ygap:4,texttemplate:'%{z:.1%}',textfont:{size:13},
+hovertemplate:`${esc(model.replace(/^MIGHTE-/,''))} · %{x}<br>%{y}: %{z:.1%}<extra></extra>`});
+layout['xaxis'+suffix]={type:'category',anchor:'y'+suffix,tickmode:'array',tickvals:values.map(r=>r.target_end_date),ticktext:values.map(r=>`${r.target_end_date}<br>Horizon ${r.horizon}`),showgrid:false};
+layout['yaxis'+suffix]={type:'category',domain,anchor:'x'+suffix,showgrid:false,ticks:''};
+layout.annotations.push({text:esc(model),xref:'paper',yref:'paper',x:0,y:domain[1],yshift:12,xanchor:'left',showarrow:false,font:{color:c,size:14}})});
+if(!models.length)layout.annotations.push({text:'No selected forecasts for this week and location.',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false});
+el('chart').style.height=Math.max(400,n*260)+'px';Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false});
+}
 function plot(){const ref=el('reference').value,target=el('target').value,loc=el('location').value,mult=target.includes('prop')?100:1;
 const index=references.indexOf(ref);el('week-slider').value=index;el('week-slider').setAttribute('aria-valuetext',ref);
 el('previous-week').disabled=index<=0;el('next-week').disabled=index>=references.length-1;
-el('models').querySelectorAll('input').forEach(input=>{input.disabled=!D.forecasts.some(r=>r.target===target&&r.model_id===input.value)});
+el('models').querySelectorAll('input').forEach(input=>{input.disabled=!allForecasts.some(r=>r.target===target&&r.model_id===input.value)});
 const selectedCount=el('models').querySelectorAll('input:checked:not(:disabled)').length;
 el('model-summary').textContent=`${selectedCount} selected`;el('model-summary').setAttribute('aria-label',`Models: ${selectedCount} selected`);
 const traces=[],chosen=selectedModels();
+const previousBaseline=el('baseline').value;
+const baselines=target===TREND?D.baseline_models.filter(m=>D.categorical_forecasts.some(r=>r.model_id===m)):D.baseline_models.filter(m=>m!==D.trend_baseline);
+options('baseline',baselines.length?baselines.map(m=>[m,m]):[['','No comparison available']]);
+el('baseline').value=baselines.includes(previousBaseline)?previousBaseline:baselines.includes(D.trend_baseline)&&target===TREND?D.trend_baseline:baselines[0]||'';
+el('history').parentElement.hidden=target===TREND;
+if(target===TREND){probabilityPlot(ref,loc,chosen);table();return;}
+el('chart').style.height='';
 const observed=D.truth.filter(r=>r.target===target&&r.location===loc&&r.value!==null).sort((a,b)=>a.date.localeCompare(b.date));
 const latest=references[references.length-1],history=el('history').value;
 const start=history==='all'?(observed[0]?.date||references[0]):`${seasonYear-({recent:0,year:1,two_years:2}[history])}-07-01`;
@@ -185,6 +214,12 @@ const names=[...new Set(rows.map(r=>r.model_id))].sort(),groups=Object.fromEntri
 const selected=new Set(selectedModels()),visible=names.filter(m=>selected.has(m));
 if(!visible.length){el('accuracy').innerHTML='<div class="empty">No selected models have scored forecasts.</div>';return;}
 const theta=metric=>Object.fromEntries(names.map(m=>[m,geom(names.map(n=>{let a=0,b=0,count=0;groups[m].forEach(r=>{const other=maps[n].get(key(r));if(other){a+=r[metric];b+=other[metric];count++}});return count&&b>0?a/b:NaN}))]));
+if(el('target').value===TREND){
+let html='<table><thead><tr>'+['Model','N','Matched','RPS','Brier','Log score','Category accuracy','Category error','RPS skill','Zero-probability outcomes'].map(x=>'<th>'+x+'</th>').join('')+'</tr></thead><tbody>';
+visible.forEach(m=>{const g=groups[m],bm=maps[base]||new Map();let a=0,b=0,n=0;g.forEach(r=>{const br=bm.get(key(r));if(br){a+=r.rps;b+=br.rps;n++}});const skill=n&&b>0?1-a/b:null;
+const cells=[esc(m),g.length,n,fmt(mean(g.map(r=>r.rps))),fmt(mean(g.map(r=>r.brier))),fmt(mean(g.map(r=>r.log_score))),pct(mean(g.map(r=>r.accuracy))),fmt(mean(g.map(r=>r.absolute_category_error))),pct(skill),pct(mean(g.map(r=>r.zero_observed_probability)))];
+html+='<tr>'+cells.map((x,i)=>`<td class="${i===8&&skill!==null?(skill>=0?'positive':'negative'):''}">${x}</td>`).join('')+'</tr>'});
+el('accuracy').innerHTML=html+'</tbody></table>';return;}
 const tr=theta('wis'),tl=theta('wis_log1p');
 let html='<table><thead><tr>'+['Model','N','Matched','Mean WIS','Geo WIS','Geo log-WIS','MAE','Rel WIS','Rel log-WIS','WIS skill','50% coverage','80% coverage','95% coverage'].map(x=>'<th>'+x+'</th>').join('')+'</tr></thead><tbody>';
 visible.forEach(m=>{const g=groups[m],bm=maps[base]||new Map();let a=0,b=0,n=0;g.forEach(r=>{const br=bm.get(key(r));if(br){a+=r.wis;b+=br.wis;n++}});const skill=n&&b>0?1-a/b:null;const cells=[esc(m),g.length,n,fmt(mean(g.map(r=>r.wis)),digits),fmt(geom(g.map(r=>r.wis)),digits),fmt(geom(g.map(r=>r.wis_log1p)),Math.max(digits,5)),fmt(mean(g.map(r=>r.ae)),digits),fmt(tr[base]>0?tr[m]/tr[base]:null),fmt(tl[base]>0?tl[m]/tl[base]:null),pct(skill),pct(mean(g.map(r=>r.coverage_50))),pct(mean(g.map(r=>r.coverage_80))),pct(mean(g.map(r=>r.coverage_95)))];html+='<tr>'+cells.map((x,i)=>`<td class="${i===9&&skill!==null?(skill>=0?'positive':'negative'):''}">${x}</td>`).join('')+'</tr>'});

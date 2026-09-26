@@ -1,6 +1,6 @@
 # Prospective scoring
 
-Each target is scored separately. The default table excludes the national series to avoid mixing aggregate and state burdens, matching the previous study's default geography. Location and horizon filters are interactive.
+Each target is scored separately. The default table includes states and DC; Puerto Rico and the national series can be selected separately. Location and horizon filters are interactive.
 
 Forecasts enter scoring only if their run was completed within its original FluSight submission window. A week contributes one run: the submitted run if present, otherwise the latest completed on-time run. Previews never enter scoring. Truth is the latest retrieved observed value for the same target/date/location. Suppressed or unavailable outcomes are unscored, not imputed. Scores remain provisional while backfill continues.
 
@@ -21,3 +21,15 @@ The forecast-week slider, arrow buttons, mouse wheel over the slider, and refere
 Comparison forecasts are fetched for the displayed week even during a preview, but only weeks with an eligible prospective MIGHTE run enter the accuracy table. Displaying or downloading a public forecast does not add a scored prospective week.
 
 ED errors are computed in proportion units, while the time-series plot displays ED percentages. Raw WIS from the hospitalization and ED targets should not be compared or averaged together.
+
+## Hospitalization trends
+
+Five-class PMFs are scored only when both the target week and the Saturday before the reference date have observed hospitalization counts. Labels follow [ORDINAL.md](ORDINAL.md). The forecast's frozen population applies to its comparisons as well. Revised observed values at either week can change the category and scores; training adjustments and proxies never enter this evaluation.
+
+- **RPS:** sum of squared cumulative probability errors over the four ordered category boundaries, without division by four (range 0–4), matching the study.
+- **Brier:** sum of squared errors across all five category probabilities (range 0–2).
+- **Log score:** negative log probability assigned to the observed category, evaluated with a numerical floor of 1e-15. The zero-probability outcome rate is reported separately.
+- **Category accuracy / error:** frequency of the most-probable category matching truth, and mean absolute distance in category steps. Ties favor stable, decrease, increase, large decrease, then large increase.
+- **RPS skill:** `1 - sum(model RPS) / sum(baseline RPS)` on exactly matched forecast keys. Missing overlap or a zero baseline sum remains undefined. The preferred baseline is the hub's `FluSight-baseline_cat`, once published for the season.
+
+Quantile interval coverage remains specific to the quantitative targets. The trend plot shows all five probabilities for each forecast horizon, using a fixed color for each model. Models publishing only categorical forecasts are included in current-season discovery.

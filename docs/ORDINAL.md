@@ -1,18 +1,32 @@
-# Adding the ordinal model
+# MIGHTE-Base-Ordinal
 
-The ordinal model remains disabled until its testing is finished. The runner never derives trend probabilities from the hospitalization quantiles as a substitute.
+The prospective pipeline fits the study's multiclass MIGHTE-Base-Ordinal component each week and appends its probabilities to the MIGHTE-Base CSV. It is a separate fitted component within the Base submission, with no fourth hub model or retrospective forecast runner. Its entry point is `mighte.ordinal:predict` in `config/settings.json`.
 
-1. Implement `predict(context)` in `src/mighte/ordinal.py` or another module inside `mighte`.
-2. Set `ordinal_plugin` to `mighte.ordinal:predict` in `config/settings.json`.
-3. Update MIGHTE-Base's metadata to describe the added categorical method, and submit that metadata change.
-4. Run a preview and tests before the next prospective forecast.
+## Construction
 
-The context dictionary contains `reference_date`, `snapshot_path`, `hospitalization_history`, `base_hospitalization_quantiles`, and `settings`. The history ends at the anchor (`reference_date - 7 days`). Reuse the frozen inputs rather than fetching another vintage inside the plugin. All model code and calibration artifacts must live inside this repository.
+The shared Base feature builder supplies hospitalization lags, rolling and seasonal features, location and horizon features, national WastewaterSCAN influenza A level and lags 1, 2, 4, and national NSSP influenza ED level and lags 1, 2, 4. It uses the same frozen snapshot, availability indicators, source delays and staleness limits as Base. No quantile forecasts enter the classifier.
 
-Return a nonempty pandas DataFrame with precisely the eight hub columns. Every row has target `wk flu hosp rate change` and output type `pmf`. Allowed horizons here are 0–3. Every forecast unit needs all five categories, in the hub spelling:
+Training targets end on or before the anchor Saturday (`reference_date - 7 days`); predictor histories also stop at that anchor. Exact calendar joins construct the future training outcomes. A bag samples 80% of seasons without replacement. The 100 fits use the Base tree settings, 250 boosting rounds and multiclass log loss. Their five-class probability vectors are averaged arithmetically. The prospective seed is Base's seed, 20360429, with the same anchor timestamp and bag offsets as the study kernel; no retrospective origin-index offset is needed.
 
-`large_decrease`, `decrease`, `stable`, `increase`, `large_increase`.
+The term “ordinal” identifies the ordered outcome. This selected implementation uses nominal multiclass loss, without a proportional-odds link or an explicit ordering penalty. Its probabilities form a valid ordered distribution but are not required to agree with the independently fitted hospitalization quantiles. No post-fit calibration, recent-performance weighting or tuning is added.
 
-Values must be nonnegative, at most one, and sum to one for each location/horizon/reference date. Target end date still equals reference date plus horizon weeks. The hub's 2026–27 written definition compares the target hospitalization rate with the week **before** the reference date; note that this detail must be checked when integrating the categorical model. The hub's task metadata description and README have differed in wording, so use the current written examples and confirm any unresolved interpretation with CDC.
+## Labels
 
-The output is appended only to the MIGHTE-Base CSV and validated with the quantile rows. Base's hospitalization and ED models, Linear and Nsemble remain unchanged. Adding ordinal-specific accuracy metrics and a probability plot should accompany the final validated ordinal model; the current accuracy table evaluates quantile forecasts only.
+The [hub's written rules and examples](https://github.com/cdcepi/FluSight-forecast-hub/blob/main/model-output/README.md#weekly-flu-hospitalization-rate-change) define change relative to the Saturday **before** the reference date. Horizon 0–3 target dates equal the reference Saturday plus 0–3 weeks. Population comes from the frozen hub locations file.
+
+| Horizon | Stable rate boundary per 100,000 | Large-change boundary per 100,000 |
+| --- | ---: | ---: |
+| 0 | 0.3 | 1.7 |
+| 1 | 0.5 | 3.0 |
+| 2 | 0.7 | 4.0 |
+| 3 | 1.0 | 5.0 |
+
+Change is stable when its absolute rate is strictly below the stable boundary **or** its absolute count is less than ten admissions. Large changes meet or exceed the large boundary after applying that count rule. The remaining nonstable changes are increases or decreases. Categories are `large_decrease`, `decrease`, `stable`, `increase`, `large_increase`.
+
+Historical training counts retain the study's reconstructed ILINet/FluSurv-NET segment and historical scale adjustment. Categories made from those training counts are consequently proxy labels in that period, not official observed historical trend truth. Modern anchors use observed admissions. Evaluation derives labels only from raw observed hospitalization truth at both required weeks, with the population frozen for that forecast. Missing observations are not reconstructed for scoring.
+
+## Output and checks
+
+Every location/horizon has all five `pmf` rows for `wk flu hosp rate change`, with finite probabilities in [0,1] summing to one. The pipeline validates complete hospitalization-location coverage and the combined eight-column Base file. Linear and Nsemble remain hospitalization-only. Per-bag checkpoints and `fit.json` record features, cutoffs, class counts, populations, thresholds and fit settings; normal run hashes prevent resuming against changed code, settings or inputs.
+
+The dashboard's Hospitalization trend target shows probabilities and, once observed outcomes exist, RPS, Brier score, log score, classification accuracy, category error and matched-baseline RPS skill. Previews never enter prospective accuracy. These implementation checks do not establish prospective calibration or improvement over the quantitative Base model.

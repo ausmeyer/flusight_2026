@@ -1,6 +1,6 @@
 # MIGHTE · FluSight
 
-Standalone influenza hospitalization and emergency-department forecasting with MIGHTE-Base, MIGHTE-Linear, and MIGHTE-Nsemble.
+Standalone influenza hospitalization and emergency-department forecasting with MIGHTE-Base, MIGHTE-Linear, and MIGHTE-Nsemble. MIGHTE-Base also forecasts hospitalization trends.
 
 ## Requirements
 

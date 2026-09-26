@@ -43,3 +43,13 @@ The national ED horizon-3 median is 0.96%, with a 95% prediction interval of 0.3
 ## Clean installation and CI
 
 Commit `c5f603f` was cloned from GitHub into a new temporary directory. The documented `./mighte setup` command created its own environment; all 39 tests, linting and metadata checks passed with the package loaded from that clone. The same commit passed [Linux GitHub CI](https://github.com/ausmeyer/flusight_2026/actions/runs/36180915580). No neighboring research directory was needed.
+
+## Direct categorical component
+
+The prospective multiclass port reproduces all 60 probabilities from the independent study fixture exactly in the pinned environment. The fixture uses the shared Base feature table, synthetic covariates and populations, and exercises all five classes. Original source and fixture hashes are recorded in `port-provenance.json`.
+
+All 100 local tests pass. Checks cover the CDC count/rate boundaries at every horizon, the reference-minus-seven baseline, identical Base/ordinal feature columns including both covariate lag families, future-outcome and unreleased-covariate invariance, checkpoint reuse, invalid probability rejection and complete categorical location/horizon coverage. Full synthetic pipeline runs fit the actual classifier, append its output only to Base and produce identical serial/parallel files. Quantitative golden forecasts remain unchanged.
+
+RPS, Brier and log scores are checked against numerical examples, including missing and revised observed truth, fixed forecast populations, tied categories, zero-probability outcomes and matched skill denominators. Categorical-only peer models are loaded from the season catalog. Neither their preview weeks nor local previews enter accuracy. Browser checks confirm probability grids, model selection and horizon filtering; displayed scores agree with the Python calculations. The synthetic dashboard fixture remains outside the prospective archive and is not published.
+
+A fresh temporary standalone copy was installed with `./mighte setup`; all 100 tests, linting and metadata validation also passed there, with package imports resolved inside that copy and no neighboring study directory required.
