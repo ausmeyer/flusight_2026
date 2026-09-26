@@ -112,13 +112,20 @@ def locations(run, model, target):
     return {h: set(g.location) for h, g in frame[frame.target.eq(target)].groupby("horizon")}
 
 
-@pytest.mark.parametrize("scenario", ["location", "nssp_stale", "nssp_missing", "ww_missing", "ed_release", "plausibility"])
-def test_missing_inputs_omit_only_dependent_outputs(root, tmp_path, scenario):
+SCENARIOS = ["location", "all_hospital_anchors", "nssp_stale", "nssp_missing", "ww_missing", "ed_release",
+             "plausibility"]
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS)
+def test_missing_inputs_use_the_fallback_without_omitting_forecasts(root, tmp_path, scenario):
     week = pd.Timedelta(weeks=1)
 
     def mutate(truth, nssp, ww):
+        hosp_anchor = truth.target.eq(HOSP) & truth.date.eq(ANCHOR)
         if scenario == "location":
-            truth = truth[~(truth.target.eq(HOSP) & truth.location.eq("US") & truth.date.eq(ANCHOR))]
+            truth = truth[~(hosp_anchor & truth.location.eq("US"))]
+        if scenario == "all_hospital_anchors":
+            truth = truth[~hosp_anchor]
         if scenario in {"nssp_stale", "ed_release"}:
             nssp = nssp[nssp.date.lt(ANCHOR)]
         if scenario == "ed_release":
@@ -135,39 +142,48 @@ def test_missing_inputs_omit_only_dependent_outputs(root, tmp_path, scenario):
     _, snapshot = synthetic_project(root, tmp_path, mutate=mutate)
     run = run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
     manifest = verify_run(tmp_path, run)
-    models, notices = manifest["models"], " | ".join(manifest["notices"])
+    notices = " | ".join(manifest["notices"])
     everywhere = {h: {"01", "02", "US"} for h in range(4)}
+    # Nothing is omitted: every model covers every location, target and horizon.
+    assert manifest["models"] == ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]
+    for model in manifest["models"]:
+        assert locations(run, model, HOSP) == everywhere
+    for target in [ED, TREND]:
+        assert locations(run, "MIGHTE-Base", target) == everywhere
+    component = lambda name: read_forecast(run / f"components/{name}.csv")
+    base = read_forecast(run / "model-output/MIGHTE-Base/2026-10-10-MIGHTE-Base.csv")
+    ordered = lambda frame: frame.sort_values(UNIT + ["output_type_id"]).value.to_numpy()
     if scenario == "location":
-        assert models == ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]
-        assert "no 2026-10-03 value for US; omitted for those locations" in notices
-        for model in models:
-            assert locations(run, model, HOSP) == {h: {"01", "02"} for h in range(4)}
-        assert locations(run, "MIGHTE-Base", ED) == everywhere
-        assert locations(run, "MIGHTE-Base", TREND) == {h: {"01", "02"} for h in range(4)}
+        fallback = component("fallback-hospitalizations")
+        for model in manifest["models"]:
+            frame = read_forecast(run / f"model-output/{model}/2026-10-10-{model}.csv")
+            us = frame[frame.target.eq(HOSP) & frame.location.eq("US")]
+            np.testing.assert_allclose(ordered(us), np.rint(ordered(fallback[fallback.location.eq("US")])))
+        assert "no 2026-10-03 value for US" in notices and "last reported value" in notices
+    if scenario == "all_hospital_anchors":
+        assert not (run / "components/linear.csv").exists() and "for all locations" in notices
+        np.testing.assert_allclose(ordered(base[base.target.eq(HOSP)]), np.rint(ordered(component("fallback-hospitalizations"))))
     if scenario == "nssp_stale":
-        assert models == ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]
-        assert "used 2026-09-26" in notices
+        assert "used 2026-09-26" in notices and "without wastewater" not in notices
     if scenario == "nssp_missing":
-        assert models == ["MIGHTE-Base", "MIGHTE-Linear"]
-        assert manifest["validation"]["MIGHTE-Base"]["targets"] == [ED]
-        assert "National NSSP covariate missing" in notices and "Not produced this week: MIGHTE-Nsemble" in notices
-        assert "without hospital admissions, hospitalization trends" in notices
+        assert ("National NSSP unavailable: MIGHTE-Base admissions, the Nsemble NSSP part, MIGHTE-Base trends "
+                "used MIGHTE-Base without wastewater and NSSP") in notices
+        np.testing.assert_allclose(ordered(base[base.target.eq(HOSP)]), np.rint(ordered(component("fallback-hospitalizations"))))
+        assert not (run / "components/nssp-hospitalizations.csv").exists()
     if scenario == "ww_missing":
-        assert models == ["MIGHTE-Linear"] and "WastewaterSCAN covariate missing" in notices
+        assert "WastewaterSCAN unavailable" in notices and "MIGHTE-Base ED visits" in notices
+        assert (run / "components/fallback-ed.csv").exists() and not (run / "components/base-ed.csv").exists()
     if scenario == "ed_release":
-        assert models == ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]
-        assert set(manifest["validation"]["MIGHTE-Base"]["targets"]) == {HOSP, TREND}
-        assert "ED visits: no 2026-10-03 values released" in notices and "used 2026-09-26" in notices
+        assert not (run / "components/base-ed.csv").exists() and set(component("fallback-ed").location) == {"01", "02", "US"}
+        assert "ED visits: no 2026-10-03 value for all locations" in notices and "used 2026-09-26" in notices
     if scenario == "plausibility":
-        assert models == ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]
-        assert all("02" not in found for found in locations(run, "MIGHTE-Base", ED).values())
-        assert "removed Alaska" in notices and "plausibility" in notices
-        assert locations(run, "MIGHTE-Base", HOSP) == everywhere
+        assert base[base.target.eq(ED)].value.max() == .25
+        assert "MIGHTE-Base ED visits: Alaska h0,1,2,3 capped at the hub's plausibility limit" in notices
 
 
 def test_run_without_any_producible_forecast_fails_loudly(root, tmp_path):
     def mutate(truth, nssp, ww):
-        return truth[truth.date.lt(ANCHOR)], nssp, ww
+        return truth[truth.target.ne(HOSP)], nssp, ww
 
     _, snapshot = synthetic_project(root, tmp_path, with_ordinal=False, mutate=mutate)
     with pytest.raises(ValueError, match="No forecasts could be produced"):

@@ -33,7 +33,7 @@ At every location, horizon and quantile: `(WW-only + NSSP-only + Linear) / 3`. A
 
 ## Target conventions
 
-The anchor is reference Saturday minus seven days. Horizons 0–3 correspond to anchor leads 1–4. Prospective runs require fresh Wednesday inputs. Locations without an observed anchor are omitted for that target and listed as notices. National forecasts are model outputs, not a sum of state quantiles. Training proxies/interpolated gaps are never scored as observed truth.
+The anchor is reference Saturday minus seven days. Horizons 0–3 correspond to anchor leads 1–4. Prospective runs require fresh Wednesday inputs. Missing inputs use the fallback described in [DATA.md](DATA.md); no location or horizon is omitted. National forecasts are model outputs, not a sum of state quantiles. Training proxies/interpolated gaps are never scored as observed truth.
 
 ED forecasts use a Gaussian working distribution for changes in log-odds and are exported as proportions bounded to [0,1] by the inverse link. This replaces log1p of percentage points, whose additive offset was one percentage point. The boundary convention handles rounded zeros; it is not an estimated correction for reporting or backfill. A bounded link and a successful numerical fit do not establish interval calibration, which requires observed forecast outcomes. The hub's written plausibility limit of 0.25 is checked and triggers a failure if exceeded; forecasts are not silently truncated to that plausibility threshold. Hospitalization forecasts are integer-valued, nonnegative and checked against the written 30%-of-population bound.
 

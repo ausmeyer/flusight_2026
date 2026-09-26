@@ -40,27 +40,33 @@ def pooled_features(history: pd.DataFrame, snapshot: Path, reference: str,
 
 def distributional(history: pd.DataFrame, snapshot: Path, reference: str, settings: dict,
                    signals: tuple[str, ...], target: str, component: str, checkpoint: Path,
-                   location_map: dict) -> pd.DataFrame:
+                   location_map: dict, carry_forward=False) -> pd.DataFrame:
+    """Forecast locations with an observed anchor. With `carry_forward` (the fallback), locations
+    without an anchor value are also forecast, starting from their last reported value."""
     runtime = core.RuntimeConfig.from_dict(settings["runtime"])
     anchor = pd.Timestamp(reference) - pd.Timedelta(weeks=1)
     pooled, columns = pooled_features(history, snapshot, reference, runtime, signals,
                                       shifted=target == HOSP or settings["ed_history"]["mode"] != "observed")
     train = pooled[(pooled.target_date <= anchor) & (pooled.date <= anchor)].copy()
     train = train.dropna(subset=["total_hosp", "target"]).reset_index(drop=True)
-    # Forecast only locations with an observed anchor; others keep their history for training.
-    test = pooled[pooled.date.eq(anchor) & pooled.total_hosp.notna()].reset_index(drop=True)
+    test = pooled[pooled.date.eq(anchor)]
+    test = (test if carry_forward else test[test.total_hosp.notna()]).reset_index(drop=True)
+    level = test.total_hosp.to_numpy()
+    if carry_forward:
+        last = history.dropna(subset=["total_hosp"]).sort_values("date").groupby("location_name").total_hosp.last()
+        level = test.total_hosp.fillna(test.location_name.map(last)).to_numpy()
     if len(train) < runtime.min_train_rows or test.empty:
-        raise ValueError(f"Insufficient training data or no observed forecast anchor: {component}")
+        raise ValueError(f"Insufficient training data or no forecast anchor: {component}")
     transform = None
     if target == ED:
         epsilon = boundary_epsilon(settings["ed_target_transform"])
         transform = {"name": "logit", "boundary_epsilon": epsilon,
                      "input_unit": "percentage points", "checkpoint_unit": "percentage points"}
         y = ed_logit(train.target.to_numpy() / 100, epsilon) - ed_logit(train.total_hosp.to_numpy() / 100, epsilon)
-        anchor_link = ed_logit(test.total_hosp.to_numpy() / 100, epsilon)
+        anchor_link = ed_logit(level / 100, epsilon)
     else:
         y = np.log1p(train.target.to_numpy()) - np.log1p(train.total_hosp.to_numpy())
-        anchor_link = np.log1p(test.total_hosp.to_numpy())
+        anchor_link = np.log1p(level)
     seasons = sorted(train.season.unique())
     bag_size = max(1, int(round(len(seasons) * runtime.bag_frac)))
     seed = int(settings["seed"])
@@ -119,7 +125,7 @@ def distributional(history: pd.DataFrame, snapshot: Path, reference: str, settin
                             "target_end_date": row.target_date.date().isoformat(),
                             "location": location_map[row.location_name], "output_type": "quantile",
                             "output_type_id": q, "value": float(value)})
-    write_json(checkpoint / "fit.json", {"component": component, "bags": len(predictions),
+    write_json(checkpoint / "fit.json", {"component": component, "bags": len(predictions), "carry_forward": carry_forward,
                                         "training_rows": len(train), "features": columns,
                                         "seed": seed, "signals": list(signals),
                                         "aggregation": "pointwise median of bag quantiles",
@@ -161,7 +167,7 @@ def persistence_baseline(history: pd.DataFrame, reference: str, target: str, loc
     for name, group in history[history.date.le(anchor)].groupby("location_name"):
         if location_map[name] not in set(locations):
             continue
-        values = group.sort_values("date").total_hosp
+        values = group.sort_values("date").total_hosp.dropna()  # persists the last reported value
         increments = values.diff().dropna().tail(104).to_numpy()
         errors = np.concatenate([increments, -increments, [0.]])
         for h in range(4):

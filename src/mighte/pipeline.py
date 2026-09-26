@@ -20,9 +20,13 @@ from .util import code_hash, digest, utc_now, write_json
 
 
 TARGET_LABELS = {HOSP: "hospital admissions", ED: "ED visits", TREND: "hospitalization trends"}
-COMPONENT_INPUTS = {"linear": ("hosp",), "base-hospitalizations": ("hosp", "ww", "nssp"),
-                    "ww-hospitalizations": ("hosp", "ww"), "nssp-hospitalizations": ("hosp", "nssp"),
-                    "base-ed": ("ed", "ww"), "base-ordinal": ("hosp", "ww", "nssp")}
+# Components with surveillance covariates; see the fallback in run_forecasts.
+COMPONENTS = {"base-hospitalizations": (HOSP, ("ww", "nssp")), "ww-hospitalizations": (HOSP, ("ww",)),
+              "nssp-hospitalizations": (HOSP, ("nssp",)), "base-ed": (ED, ("ww",))}
+FALLBACK = {HOSP: "fallback-hospitalizations", ED: "fallback-ed"}
+COMPONENT_LABELS = {"base-hospitalizations": "MIGHTE-Base admissions", "ww-hospitalizations": "the Nsemble wastewater part",
+                    "nssp-hospitalizations": "the Nsemble NSSP part", "base-ed": "MIGHTE-Base ED visits",
+                    "base-ordinal": "MIGHTE-Base trends"}
 
 
 def environment() -> dict:
@@ -43,7 +47,7 @@ def write_forecast(path: Path, frame: pd.DataFrame) -> None:
     temp.replace(path)
 
 
-def fit_component(name, target, signals, run, snapshot, reference, settings, location_map):
+def fit_component(name, target, signals, run, snapshot, reference, settings, location_map, carry_forward=False):
     """Each process owns one component's checkpoints and output file."""
     path = run / "components" / f"{name}.csv"
     if path.exists():
@@ -52,7 +56,7 @@ def fit_component(name, target, signals, run, snapshot, reference, settings, loc
                           parse_dates=["date"])
     with threadpool_limits(limits=int(settings["threads"])):
         result = distributional(history, snapshot, reference, settings, signals, target,
-                                name, run / "checkpoints" / name, location_map)
+                                name, run / "checkpoints" / name, location_map, carry_forward)
     write_forecast(path, result)
     return read_forecast(path)
 
@@ -119,35 +123,59 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
     for target, history in histories.items():
         history.to_csv(run / ("hospitalization-training.csv" if target == HOSP else "ed-training.csv"), index=False)
 
-    # A component runs only when its target and covariates are available this week.
-    available = {"hosp": HOSP in histories, "ed": ED in histories,
-                 **{key: audit["covariates"][key]["available"] for key in ["ww", "nssp"]}}
-    runnable = {name for name, needs in COMPONENT_INPUTS.items() if all(available[x] for x in needs)}
-    results = {}
-    if "linear" in runnable:
+    # Fallback: MIGHTE-Base without wastewater and NSSP. It replaces any part whose covariate is
+    # unavailable and forecasts locations without an anchor value from their last reported value.
+    available = {key: audit["covariates"][key]["available"] for key in ["ww", "nssp"]}
+    missing = {target: set(audit[target]["anchor_missing"]) for target in histories}
+    jobs = {name: (target, signals, False) for name, (target, signals) in COMPONENTS.items()
+            if target in histories and all(available[x] for x in signals)
+            and len(missing[target]) < len(audit[target]["locations"])}
+    for target in histories:
+        if missing[target] or any(t == target and name not in jobs for name, (t, _) in COMPONENTS.items()):
+            jobs[FALLBACK[target]] = (target, (), True)
+    use_ordinal = bool(settings.get("ordinal_plugin")) and HOSP in histories
+    replaced = [name for name, (t, _) in COMPONENTS.items() if t in histories and name not in jobs
+                and not all(available.values())] + (["base-ordinal"] if use_ordinal and not all(available.values()) else [])
+    if replaced:
+        lost = " and ".join(label for key, label in [("nssp", "National NSSP"), ("ww", "WastewaterSCAN")]
+                            if not available[key])
+        notices.append(f"{lost} unavailable: " + ", ".join(COMPONENT_LABELS[n] for n in replaced)
+                       + " used MIGHTE-Base without wastewater and NSSP")
+    linear_frame = None
+    if HOSP in histories and len(missing[HOSP]) < len(audit[HOSP]["locations"]):
         with threadpool_limits(limits=int(settings["threads"])):
             linear_file = components / "linear.csv"
             if not linear_file.exists():
                 print("Fitting MIGHTE-Linear...", flush=True)
                 write_forecast(linear_file, linear(histories[HOSP], reference, settings, location_map))
-            results["linear"] = read_forecast(linear_file)
-    jobs = [job for job in [("base-hospitalizations", HOSP, ("ww", "nssp")),
-                            ("ww-hospitalizations", HOSP, ("ww",)),
-                            ("nssp-hospitalizations", HOSP, ("nssp",)), ("base-ed", ED, ("ww",))]
-            if job[0] in runnable]
+            linear_frame = read_forecast(linear_file)
     args = (run, snapshot, reference, settings, location_map)
     workers = int(settings.get("component_workers", 2))
     if workers not in {1, 2}:
         raise ValueError("component_workers must be 1 or 2")
     if workers == 1:
-        fitted = [fit_component(*job, *args) for job in jobs]
+        results = {name: fit_component(name, target, signals, *args, carry)
+                   for name, (target, signals, carry) in jobs.items()}
     else:
         # Spawn avoids inheriting native OpenMP state from the linear fit.
         with ProcessPoolExecutor(max_workers=workers, mp_context=get_context("spawn")) as executor:
-            futures = [executor.submit(fit_component, *job, *args) for job in jobs]
-            fitted = [future.result() for future in futures]
-    results.update({job[0]: frame for job, frame in zip(jobs, fitted)})
-    if settings.get("ordinal_plugin") and "base-ordinal" in runnable:
+            futures = {name: executor.submit(fit_component, name, target, signals, *args, carry)
+                       for name, (target, signals, carry) in jobs.items()}
+            results = {name: future.result() for name, future in futures.items()}
+
+    def part(frame, target):
+        """A part's forecasts for anchored locations, plus the fallback wherever it is missing."""
+        wanted = set(audit[target]["locations"])
+        fallback = results.get(FALLBACK[target])
+        if frame is None:
+            return fallback[fallback.location.isin(wanted)]
+        frame = frame[~frame.location.isin(missing[target])]
+        if missing[target]:
+            frame = pd.concat([frame, fallback[fallback.location.isin(missing[target])]], ignore_index=True)
+        return frame
+
+    ordinal = None
+    if use_ordinal:
         module, name = settings["ordinal_plugin"].split(":")
         if not module.startswith("mighte."):
             raise ValueError("Keep ordinal plugin code inside this standalone mighte package")
@@ -160,40 +188,33 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
             with threadpool_limits(limits=int(settings["threads"])):
                 ordinal = fn({"reference_date": reference, "snapshot_path": snapshot,
                               "hospitalization_history": ordinal_history,
-                              "base_hospitalization_quantiles": results["base-hospitalizations"].copy(),
-                              "settings": settings, "checkpoint_path": ordinal_checkpoint})
+                              "base_hospitalization_quantiles": part(results.get("base-hospitalizations"), HOSP),
+                              "settings": settings, "checkpoint_path": ordinal_checkpoint,
+                              "signals": ("ww", "nssp") if all(available.values()) else (),
+                              "locations": [names[x] for x in audit[HOSP]["locations"]]})
             if ordinal.empty or set(ordinal.columns) != set(COLUMNS):
                 raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
             write_forecast(ordinal_path, ordinal)
         ordinal = read_forecast(ordinal_path)
         if ordinal.empty or set(ordinal.target) != {TREND} or set(ordinal.columns) != set(COLUMNS):
             raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
-        results["base-ordinal"] = ordinal
         if (ordinal_checkpoint / "fit.json").exists():
             audit["ordinal"] = json.loads((ordinal_checkpoint / "fit.json").read_text())
             write_json(run / "data-audit.json", audit)
 
-    forecasts, expected_targets = {}, {}
-    base_parts = {HOSP: "base-hospitalizations", ED: "base-ed"}
-    if settings.get("ordinal_plugin"):
-        base_parts[TREND] = "base-ordinal"
-    parts = {target: component for target, component in base_parts.items() if component in results}
-    if parts:
-        forecasts["MIGHTE-Base"] = pd.concat([results[c] for c in parts.values()], ignore_index=True)
-        expected_targets["MIGHTE-Base"] = set(parts)
-        if set(parts) != set(base_parts):
-            notices.append("MIGHTE-Base produced without " + ", ".join(
-                TARGET_LABELS[t] for t in base_parts if t not in parts))
-    if "linear" in results:
-        forecasts["MIGHTE-Linear"] = results["linear"]
-        expected_targets["MIGHTE-Linear"] = {HOSP}
-    if {"ww-hospitalizations", "nssp-hospitalizations", "linear"} <= set(results):
-        forecasts["MIGHTE-Nsemble"] = equal_quantiles(
-            [results["ww-hospitalizations"], results["nssp-hospitalizations"], results["linear"]])
-        expected_targets["MIGHTE-Nsemble"] = {HOSP}
-    missing_models = [model for model in MODELS if model not in forecasts]
-    if missing_models:
-        notices.append("Not produced this week: " + ", ".join(missing_models))
+    forecasts = {}
+    if HOSP in histories:
+        base = [part(results.get("base-hospitalizations"), HOSP)]
+        if ED in histories:
+            base.append(part(results.get("base-ed"), ED))
+        if ordinal is not None:
+            base.append(ordinal)
+        forecasts["MIGHTE-Base"] = pd.concat(base, ignore_index=True)
+        forecasts["MIGHTE-Linear"] = part(linear_frame, HOSP)
+        ensemble = None if linear_frame is None else equal_quantiles(
+            [part(results.get(name), HOSP)[lambda f: ~f.location.isin(missing[HOSP])]
+             for name in ["ww-hospitalizations", "nssp-hospitalizations"]] + [linear_frame])
+        forecasts["MIGHTE-Nsemble"] = part(ensemble, HOSP)
     if not forecasts:
         raise ValueError("No forecasts could be produced:\n- " + "\n- ".join(notices))
 
@@ -201,22 +222,22 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
     for model, frame in forecasts.items():
         hosp = frame.target.eq(HOSP)
         frame.loc[hosp, "value"] = np.rint(frame.loc[hosp, "value"])
-        # The hub flags these quantiles for review; remove only the affected location-horizons.
-        flagged = contract.implausible_units(frame)
-        if not flagged.empty:
-            frame = frame.merge(flagged.assign(_flagged=True), on=["target", "location", "horizon"], how="left")
-            frame = frame[frame.pop("_flagged").isna()].reset_index(drop=True)
-            for target, group in flagged.groupby("target"):
-                units = "; ".join(f"{names[location]} h{','.join(str(h) for h in sorted(g.horizon))}"
+        # Quantiles above the hub's plausibility limits (ED 0.25, admissions 30% of population) are capped.
+        limit = np.where(frame.target.eq(ED), .25, np.floor(frame.location.map(contract.population).astype(float) * .30))
+        capped = frame.output_type.eq("quantile") & (frame.value > limit)
+        if capped.any():
+            frame.loc[capped, "value"] = limit[capped.to_numpy()]
+            for target, group in frame[capped].groupby("target"):
+                units = "; ".join(f"{names[location]} h{','.join(str(h) for h in sorted(g.horizon.unique()))}"
                                   for location, g in group.groupby("location"))
-                notices.append(f"{model} {TARGET_LABELS[target]}: removed {units} "
-                               "(quantiles above the hub's plausibility limit)")
-        for target in expected_targets[model]:
+                notices.append(f"{model} {TARGET_LABELS[target]}: {units} capped at the hub's plausibility limit")
+        targets = {HOSP} | ({ED} if model == "MIGHTE-Base" and ED in histories else set()) | (
+            {TREND} if model == "MIGHTE-Base" and ordinal is not None else set())
+        for target in targets:
             expected = set(audit[HOSP if target == TREND else target]["locations"])
             for horizon in range(4):
-                removed = set(flagged.loc[flagged.target.eq(target) & flagged.horizon.eq(horizon), "location"])
                 actual = set(frame.loc[frame.target.eq(target) & frame.horizon.eq(horizon), "location"])
-                if actual != expected - removed:
+                if actual != expected:
                     raise ValueError(f"Incomplete forecast coverage in {model}, {target}, horizon {horizon}")
         path = run / "model-output" / model / f"{reference}-{model}.csv"
         write_forecast(path, frame)

@@ -274,7 +274,11 @@ LABELS = {HOSP: "Hospital admissions", ED: "ED visits"}
 
 
 def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -> tuple[dict, dict]:
-    """Training histories and availability. Missing inputs omit only what depends on them, with notices."""
+    """Training histories and input availability.
+
+    Every location reported in the past year is forecast. Locations without an anchor value, and
+    covariates beyond the staleness limit, are recorded so the pipeline can use its fallback.
+    """
     epsilon = boundary_epsilon(settings["ed_target_transform"])
     anchor = pd.Timestamp(reference) - pd.Timedelta(weeks=1)
     contract = Contract(snapshot / "contract")
@@ -286,16 +290,18 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
     for target in [HOSP, ED]:
         allowed = set(contract.by_target[target]["task_ids"]["location"]["optional"])
         observed = truth[truth.target.eq(target) & truth.location.isin(allowed) & truth.value.notna()]
-        forecastable = set(observed.loc[observed.date.eq(anchor), "location"])
-        recent = set(observed.loc[observed.date.ge(anchor - pd.Timedelta(weeks=8)), "location"])
-        audit[target] = {"anchor": anchor.date().isoformat(), "locations": sorted(forecastable),
-                         "excluded_locations": sorted(allowed - forecastable)}
-        if not forecastable:
-            notices.append(f"{LABELS[target]}: no {anchor.date()} values released; target omitted")
+        expected = set(observed.loc[observed.date.gt(anchor - pd.Timedelta(weeks=52)), "location"])
+        last = observed.groupby("location").date.max()
+        missing = {x: last[x].date().isoformat() for x in sorted(expected) if last[x] < anchor}
+        audit[target] = {"anchor": anchor.date().isoformat(), "locations": sorted(expected),
+                         "anchor_missing": missing, "excluded_locations": sorted(allowed - expected)}
+        if not expected:
+            notices.append(f"{LABELS[target]}: nothing reported in the past year; target omitted")
             continue
-        if recent - forecastable:
-            missing = ", ".join(sorted(names[x] for x in recent - forecastable))
-            notices.append(f"{LABELS[target]}: no {anchor.date()} value for {missing}; omitted for those locations")
+        if missing:
+            which = "all locations" if len(missing) == len(expected) else ", ".join(names[x] for x in missing)
+            notices.append(f"{LABELS[target]}: no {anchor.date()} value for {which}; forecast by MIGHTE-Base "
+                           "without wastewater and NSSP from the last reported value")
         model = observed[["location_name", "date", "value"]].rename(columns={"value": "total_hosp"})
         if target == HOSP:
             model, n_filled = hospitalization_history(root, model, anchor)
@@ -333,10 +339,7 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
         available = pd.notna(latest) and latest >= expected - week
         covariates[key] = {"available": bool(available), "expected_week": expected.date().isoformat(),
                            "week_used": latest.date().isoformat() if available else None}
-        if not available:
-            since = f" since {latest.date()}" if pd.notna(latest) else ""
-            notices.append(f"{label} covariate missing{since}; forecasts that use it are omitted")
-        elif latest < expected:
+        if available and latest < expected:
             notices.append(f"{label} for {expected.date()} not yet available; used {latest.date()} "
                            "(the model's one-week staleness allowance)")
     audit["covariates"] = covariates

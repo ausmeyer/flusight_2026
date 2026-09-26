@@ -43,14 +43,18 @@ def validate_probabilities(probabilities):
         raise ValueError("Category probabilities must lie in [0,1] and sum to one")
 
 
-def fit_ordinal_bags(pooled, feature_cols, anchor, runtime, seed, population_map, bag_dir: Path):
-    """Port of the study classifier, with the same season draws and tree settings."""
+def fit_ordinal_bags(pooled, feature_cols, anchor, runtime, seed, population_map, bag_dir: Path, locations=None):
+    """Port of the study classifier, with the same season draws and tree settings.
+
+    `locations` (names) limits the forecast rows. A location without an anchor value is still
+    classified; LightGBM treats its anchor-week features as missing.
+    """
     train = pooled[(pooled.target_date <= anchor) & (pooled.date <= anchor)].dropna(
         subset=["total_hosp", "target"]).copy()
-    test = pooled[(pooled.date == anchor) & (pooled.horizon_weeks <= runtime.max_horizons)
-                  & pooled.total_hosp.notna()].copy()
+    test = pooled[(pooled.date == anchor) & (pooled.horizon_weeks <= runtime.max_horizons)].copy()
+    test = test[test.location_name.isin(locations)] if locations is not None else test[test.total_hosp.notna()]
     if len(train) < runtime.min_train_rows or test.empty:
-        raise ValueError("Insufficient ordinal training data or no observed forecast anchor")
+        raise ValueError("Insufficient ordinal training data or no forecast locations")
     populations = train.location_name.map(population_map).to_numpy()
     labels = category_labels(train.target, train.total_hosp, populations, train.horizon_weeks - 1)
     seasons = sorted(train.season.dropna().unique())
@@ -107,9 +111,9 @@ def predict(context):
     anchor = pd.Timestamp(reference) - pd.Timedelta(weeks=1)
     history = context["hospitalization_history"].copy()
     history = history[pd.to_datetime(history.date).le(anchor)]
-    pooled, columns = pooled_features(history, snapshot, reference, runtime, ("ww", "nssp"))
+    pooled, columns = pooled_features(history, snapshot, reference, runtime, context.get("signals", ("ww", "nssp")))
     test, probabilities, _ = fit_ordinal_bags(pooled, columns, anchor, runtime, int(settings["seed"]),
-                                             populations, Path(context["checkpoint_path"]))
+                                             populations, Path(context["checkpoint_path"]), context.get("locations"))
     rows = []
     for row, vector in zip(test.itertuples(index=False), probabilities):
         for category, value in zip(CATEGORIES, vector):
