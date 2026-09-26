@@ -13,7 +13,7 @@ from .contract import HOSP, MODELS, UNIT, Contract, read_forecast
 from .data import latest_snapshot, verify_snapshot
 from .evaluate import BENCHMARKS, LOCAL_BASELINE, discover_benchmarks, evaluate, summarize
 from .pipeline import verify_run
-from .util import utc_now, write_json
+from .util import digest, utc_now, write_json
 
 
 def records(frame: pd.DataFrame) -> list:
@@ -77,6 +77,9 @@ def build_report(root: Path, run: Path, *, online=True) -> Path:
         "__DATA__", json.dumps(payload, allow_nan=False).replace("</", "<\\/"))
     path = output / "index.html"
     path.write_text(html)
+    write_json(output / "review.json", {"run_id": manifest["run_id"],
+               "manifest_sha256": digest(run / "manifest.json"), "report_sha256": digest(path),
+               "data_sha256": digest(output / "report-data.json")})
     write_json(root / "reports/latest.json", {"file": str(path.relative_to(root))})
     return path
 

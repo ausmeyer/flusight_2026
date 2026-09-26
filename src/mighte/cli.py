@@ -11,6 +11,7 @@ import requests
 from .contract import Contract, reference_saturday
 from .data import refresh, latest_snapshot
 from .pipeline import latest_run, run_forecasts, verify_run
+from .publish import prepare_publication, publish_report, repository
 from .report import build_report
 from .submit import register, submit
 from .util import project_root
@@ -31,7 +32,7 @@ def main():
     p = sub.add_parser("resume", help="Continue an interrupted run using its original immutable inputs")
     p.add_argument("run", type=Path)
     p.add_argument("--no-open", action="store_true")
-    for command in ["review", "validate", "submit"]:
+    for command in ["review", "validate", "submit", "publish"]:
         p = sub.add_parser(command)
         p.add_argument("--run", type=Path, default=None)
         if command != "submit":
@@ -42,6 +43,8 @@ def main():
             p.add_argument("--offline", action="store_true", help="Skip fetching public benchmark forecasts")
         if command == "submit":
             p.add_argument("--yes", action="store_true", help="Confirm that these exact files were reviewed")
+        if command == "publish":
+            p.add_argument("--yes", action="store_true", help="Confirm publishing this reviewed dashboard to GitHub Pages")
     p = sub.add_parser("register", help="Review and confirm the metadata-only registration/update PR")
     p.add_argument("--yes", action="store_true", help="Confirm that the metadata and PR text were reviewed")
     sub.add_parser("check", help="Check local metadata, environment and fixed model settings")
@@ -81,6 +84,18 @@ def main():
             run = args.run or latest_run(root, preview=args.preview)
             manifest = verify_run(root, run)
             print(json.dumps(manifest["validation"], indent=2))
+            return
+        elif args.command == "publish":
+            run = args.run or latest_run(root, preview=args.preview)
+            html, metadata = prepare_publication(root, run, preview=args.preview)
+            repo = repository(root)
+            print(f"Publish the reviewed {'PREVIEW' if metadata['preview'] else 'forecast'} dashboard for "
+                  f"{metadata['reference_date']} to {repo}?\nRun: {run}")
+            if not args.yes and input("Type publish to update the public dashboard: ").strip() != "publish":
+                print("Publication cancelled.")
+                return
+            receipt = publish_report(root, repo, html, metadata)
+            print(f"Publication requested: {receipt['url']}\nDeployment status: {receipt['workflow_url']}")
             return
         else:
             run = args.run or latest_run(root)
