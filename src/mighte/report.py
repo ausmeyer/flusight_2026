@@ -125,7 +125,7 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 </section>
 <section class="card"><h2>Prospective accuracy to date</h2><div class="controls">
 <label>Comparison baseline<select id="baseline"></select></label>
-<label>Scoring locations<select id="scope"><option value="states">States + DC + Puerto Rico</option><option value="US">United States</option><option value="all">All (includes national)</option><option value="selected">Selected location above</option></select></label>
+<label>Scoring locations<select id="scope"><option value="states">States + DC</option><option value="states_pr">States + DC + Puerto Rico</option><option value="US">United States</option><option value="all">All (includes national)</option><option value="selected">Selected location above</option></select></label>
 <label>Horizon<select id="horizon"><option value="all">All horizons</option><option value="0">0 · nowcast</option><option value="1">1 week ahead</option><option value="2">2 weeks ahead</option><option value="3">3 weeks ahead</option></select></label>
 </div><div id="accuracy" class="tablewrap"></div>
 </section><section class="card"><h2>Run details</h2><div id="provenance" class="muted"></div>
@@ -177,7 +177,7 @@ const key=r=>[r.reference_date,r.target,r.horizon,r.target_end_date,r.location].
 const fmt=(v,n=3)=>v===null||!Number.isFinite(v)?'—':v.toLocaleString(undefined,{maximumFractionDigits:n});
 const pct=v=>v===null||!Number.isFinite(v)?'—':(100*v).toFixed(1)+'%';
 function table(){let rows=D.scores.filter(r=>r.target===el('target').value);const scope=el('scope').value,h=el('horizon').value,base=el('baseline').value,digits=el('target').value.includes('prop')?6:3;
-rows=rows.filter(r=>(scope==='all'||(scope==='states'?r.location!=='US':r.location===(scope==='selected'?el('location').value:scope)))&&(h==='all'||r.horizon===Number(h)));
+rows=rows.filter(r=>(scope==='all'||(scope==='states'?!['US','72'].includes(r.location):scope==='states_pr'?r.location!=='US':r.location===(scope==='selected'?el('location').value:scope)))&&(h==='all'||r.horizon===Number(h)));
 if(!rows.length){el('accuracy').innerHTML='<div class="empty">No scored prospective forecasts yet.</div>';return;}
 const names=[...new Set(rows.map(r=>r.model_id))].sort(),groups=Object.fromEntries(names.map(m=>[m,rows.filter(r=>r.model_id===m)])),maps=Object.fromEntries(names.map(m=>[m,new Map(groups[m].map(r=>[key(r),r]))]));
 const selected=new Set(selectedModels()),visible=names.filter(m=>selected.has(m));
