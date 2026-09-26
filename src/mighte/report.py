@@ -119,7 +119,7 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 </style></head><body><main>
 <div class="head"><div><div class="eyebrow">MIGHTE / FLUSIGHT 2026–27</div><h1>Weekly forecast review</h1></div></div>
 <section class="card"><h2>Prospective forecasts</h2><div class="controls">
-<label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">Influenza ED visits</option><option value="wk flu hosp rate change">Hospitalization trend</option></select></label>
+<label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">ED visits</option><option value="wk flu hosp rate change">Hospitalization trend</option></select></label>
 <label>Location<select id="location"></select></label>
 <div class="model-control"><span>Models</span><details id="model-picker" class="model-picker"><summary id="model-summary" aria-label="Models">1 selected</summary>
 <div class="model-panel"><input id="model-search" class="model-search" type="search" aria-label="Search models" placeholder="Search models">
