@@ -383,6 +383,9 @@ def central_model_params(seed: int, runtime: RuntimeConfig) -> dict:
         "verbosity": -1,
         "random_state": int(seed),
         "num_threads": runtime.num_threads,
+        # Without these, multithreaded LightGBM results change under heavy CPU load.
+        "deterministic": True,
+        "force_col_wise": True,
     }
 
 
@@ -430,6 +433,7 @@ def spread_model_params(seed: int, runtime: RuntimeConfig) -> dict:
         "verbosity": -1,
         "random_state": int(seed),
         "num_threads": runtime.num_threads,
+        "deterministic": True,
     }
 
 
