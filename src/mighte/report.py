@@ -170,7 +170,7 @@ traces.push({x:truth.map(r=>r.date),y:truth.map(r=>r.value*mult),name:'Observed 
 chosen.forEach(model=>{const rows=comparison.filter(r=>r.reference_date===ref&&r.model_id===model).sort((a,b)=>a.horizon-b.horizon);if(!rows.length)return;
 const c=colors[model]||'#658091',x=rows.map(r=>r.target_end_date);
 [['lo95','hi95',.08],['lo50','hi50',.15]].forEach(([lo,hi,a])=>{traces.push({x,y:rows.map(r=>r[lo]*mult),mode:'lines',line:{width:0},showlegend:false,hoverinfo:'skip',legendgroup:model});traces.push({x,y:rows.map(r=>r[hi]*mult),mode:'lines',line:{width:0},fill:'tonexty',fillcolor:rgba(c,a),showlegend:false,hoverinfo:'skip',legendgroup:model})});
-traces.push({x,y:rows.map(r=>r.median*mult),mode:'lines+markers',name:model,legendgroup:model,line:{color:c,width:2.5},marker:{size:8},hovertemplate:`${esc(model.replace(/^MIGHTE-/,''))}: %{y}<extra></extra>`})});
+traces.push({x,y:rows.map(r=>r.median*mult),mode:'lines+markers',name:model,legendgroup:model,line:{color:c,width:2.5},marker:{size:8},hovertemplate:`${esc(model.replace(/^MIGHTE-/,''))}: ${mult===100?'%{y:.2f}':'%{y}'}<extra></extra>`})});
 Plotly.react('chart',traces,{margin:{t:25,b:45,l:65,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},uirevision:[target,loc,history,...chosen].join('|'),xaxis:{type:'date',range:[begin,end],gridcolor:'#edf1f3'},yaxis:{title:{text:mult===100?'Influenza ED visits (%)':'Hospital admissions'},range:[0,ymax*1.08],gridcolor:'#edf1f3'},legend:{orientation:'h',y:1.14,maxheight:.25},hovermode:'x unified',shapes:[{type:'line',x0:ref,x1:ref,y0:0,y1:1,yref:'paper',line:{color:'#95a7ae',dash:'dot',width:1}}]},{responsive:true,displaylogo:false});
 table();}
 const mean=rows=>rows.length?rows.reduce((a,b)=>a+b,0)/rows.length:null;
