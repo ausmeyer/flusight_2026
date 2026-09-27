@@ -386,11 +386,12 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
         if not expected:
             notices.append(f"{LABELS[target]}: nothing reported in the past year; target omitted")
             continue
+        if len(missing) == len(expected):
+            # No location has the anchor week: the week's release is not out, so stop rather than carry forward.
+            raise ValueError(f"{LABELS[target]}: data for the week ending {anchor.date()} are not released yet "
+                             f"(latest reported week {max(missing.values())}); rerun after the Wednesday release")
         if missing:
-            dates = sorted(set(missing.values()))
-            which = (f"all locations (last reported {dates[0]}{'' if len(dates) == 1 else ' to ' + dates[-1]})"
-                     if len(missing) == len(expected) else ", ".join(f"{names[x]} (last reported {day})"
-                                                                    for x, day in missing.items()))
+            which = ", ".join(f"{names[x]} (last reported {day})" for x, day in missing.items())
             notices.append(f"{LABELS[target]}: no {anchor.date()} value for {which}; forecast by MIGHTE-Base "
                            "without wastewater and NSSP from the last reported value")
         model = observed[["location_name", "date", "value"]].rename(columns={"value": "total_hosp"})

@@ -117,8 +117,7 @@ def locations(run, model, target):
     return {h: set(g.location) for h, g in frame[frame.target.eq(target)].groupby("horizon")}
 
 
-SCENARIOS = ["location", "all_hospital_anchors", "nssp_stale", "nssp_missing", "nssp_blank", "ww_missing",
-             "ed_release", "plausibility"]
+SCENARIOS = ["location", "nssp_stale", "nssp_missing", "nssp_blank", "ww_missing", "plausibility"]
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
@@ -129,12 +128,8 @@ def test_missing_inputs_use_the_fallback_without_omitting_forecasts(root, tmp_pa
         hosp_anchor = truth.target.eq(HOSP) & truth.date.eq(ANCHOR)
         if scenario == "location":
             truth = truth[~(hosp_anchor & truth.location.eq("US"))]
-        if scenario == "all_hospital_anchors":
-            truth = truth[~hosp_anchor]
-        if scenario in {"nssp_stale", "ed_release"}:
+        if scenario == "nssp_stale":
             nssp = nssp[nssp.date.lt(ANCHOR)]
-        if scenario == "ed_release":
-            truth = truth[~(truth.target.eq(ED) & truth.date.eq(ANCHOR))]
         if scenario == "nssp_missing":
             nssp = nssp[nssp.date.lt(ANCHOR - week)]
         if scenario == "nssp_blank":  # the newest row exists but is empty, so the model would receive NaN
@@ -169,9 +164,6 @@ def test_missing_inputs_use_the_fallback_without_omitting_forecasts(root, tmp_pa
         assert "no 2026-10-03 value for US (last reported 2026-09-26)" in notices
         assert set(component("base-ordinal-fallback").location) == {"US"}
         assert set(component("base-ordinal").location) == {"01", "02"}
-    if scenario == "all_hospital_anchors":
-        assert not (run / "components/linear.csv").exists() and "for all locations" in notices
-        np.testing.assert_allclose(ordered(base[base.target.eq(HOSP)]), np.rint(ordered(component("fallback-hospitalizations"))))
     if scenario == "nssp_stale":
         assert "used 2026-09-26" in notices and "without wastewater" not in notices
     if scenario == "nssp_blank":
@@ -184,12 +176,19 @@ def test_missing_inputs_use_the_fallback_without_omitting_forecasts(root, tmp_pa
     if scenario == "ww_missing":
         assert "WastewaterSCAN unavailable" in notices and "MIGHTE-Base ED visits" in notices
         assert (run / "components/fallback-ed.csv").exists() and not (run / "components/base-ed.csv").exists()
-    if scenario == "ed_release":
-        assert not (run / "components/base-ed.csv").exists() and set(component("fallback-ed").location) == {"01", "02", "US"}
-        assert "ED visits: no 2026-10-03 value for all locations" in notices and "used 2026-09-26" in notices
     if scenario == "plausibility":
         assert base[base.target.eq(ED)].value.max() > .25  # flagged for review, never altered
         assert "MIGHTE-Base ED visits: Alaska h0,1,2,3 above the hub's plausibility limit" in notices
+
+
+@pytest.mark.parametrize("target", [HOSP, ED])
+def test_an_unreleased_week_stops_the_run_instead_of_carrying_forward(root, tmp_path, target):
+    def mutate(truth, nssp, ww):  # no location has the anchor week yet
+        return truth[~(truth.target.eq(target) & truth.date.eq(ANCHOR))], nssp, ww
+
+    _, snapshot = synthetic_project(root, tmp_path, with_ordinal=False, mutate=mutate)
+    with pytest.raises(ValueError, match="data for the week ending 2026-10-03 are not released yet"):
+        run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
 
 
 def test_run_without_any_producible_forecast_fails_loudly(root, tmp_path):
