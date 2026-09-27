@@ -131,7 +131,15 @@ def test_ed_history_is_built_from_ilinet_like_hospitalizations(root):
     source = ili[ili.location_name.isin(locations) & ili.date.le("2019-06-30")]
     assert len(proxy) == len(source)
     assert proxy.date.tolist() == (source.date + pd.Timedelta(days=728)).tolist()
-    np.testing.assert_allclose(proxy.total_hosp, np.round(100 * expit(-5 + .4 * source.ili.to_numpy()), 2))
+    # Each week takes the value at its ILINet rank in the location's observed distribution.
+    for name in locations:
+        weeks = source[source.location_name.eq(name)]
+        values = observed.loc[observed.location_name.eq(name), "total_hosp"]
+        mapped = proxy.loc[proxy.location_name.eq(name), "total_hosp"].to_numpy()
+        rank = weeks.ili.rank(method="average").to_numpy() / (len(weeks) + 1)
+        np.testing.assert_allclose(mapped, np.round(np.quantile(values, rank), 2))
+        assert values.min() - .005 <= mapped.min() and mapped.max() <= values.max() + .005
+        assert (np.diff(mapped[np.argsort(weeks.ili.to_numpy(), kind="stable")]) >= 0).all()
     with pytest.raises(ValueError, match="52 paired weeks"):
         ed_ilinet_proxy(root, observed.head(10)[["location_name", "date", "total_hosp"]], ED_TRANSFORM)
 

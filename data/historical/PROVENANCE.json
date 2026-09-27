@@ -19,6 +19,6 @@
     "meaning": "Unshifted ILINet/FluSurv predictor counts before count rounding, every week through April 2026 (frozen). The yardstick for leveling each era of the hospitalization history to the current NHSN regime."
   },
   "ilinet_normalized": {
-    "meaning": "Original per-location bestNormalize(ILI+1) values from the April 25, 2026 study input. These are transformed inputs, not raw percentages. Also used to build the ED training proxy (pooled ED log-odds regression, dates through 2019-06-30 shifted 728 days)."
+    "meaning": "Original per-location bestNormalize(ILI+1) values from the April 25, 2026 study input. These are transformed inputs, not raw percentages. Also used to build the ED training history: a pooled ED log-odds regression orders the weeks through 2019-06-30, values are quantile-mapped to each location's observed NSSP, and dates shift 728 days."
   }
 }

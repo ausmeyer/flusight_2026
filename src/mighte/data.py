@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
-from scipy.special import expit
 from urllib3.util.retry import Retry
 
 from .contract import Contract, HOSP, ED
@@ -311,22 +310,33 @@ def ed_ilinet_proxy(root: Path, observed: pd.DataFrame, transform: dict) -> tupl
     """ILINet-based ED history built like the hospitalization seed.
 
     A pooled regression of observed ED log-odds on normalized ILINet, fitted where both exist,
-    is applied to each location's ILINet through June 2019. Dates shift forward 728 days and
-    percentages are rounded to NSSP's 0.01-point reporting precision.
+    orders each location's ILINet weeks through June 2019. Each week then takes the value at the
+    same rank in the location's observed NSSP distribution, so the history keeps ILINet's timing
+    and ordering but stays within the range NSSP has shown. (Used directly, the regression put some
+    weeks at 25% of ED visits and most seasons below observed levels.) Dates shift forward 728
+    days and percentages are rounded to NSSP's 0.01-point reporting precision.
     """
     epsilon = boundary_epsilon(transform)
     ili = pd.read_csv(root / "data/historical/ilinet_normalized.csv", parse_dates=["date"])
-    paired = ili.merge(observed.dropna(subset=["total_hosp"]), on=["location_name", "date"], validate="one_to_one")
+    observed = observed.dropna(subset=["total_hosp"])
+    paired = ili.merge(observed, on=["location_name", "date"], validate="one_to_one")
     if len(paired) < 52 or paired.ili.std() < 1e-8:
         raise ValueError("At least 52 paired weeks with varying ILINet are required for ED reconstruction")
     design = np.column_stack([np.ones(len(paired)), paired.ili])
     coefficients = np.linalg.lstsq(design, ed_logit(paired.total_hosp / 100, epsilon), rcond=None)[0]
     proxy = ili[ili.date.le("2019-06-30") & ili.location_name.isin(observed.location_name.unique())].copy()
-    proxy["total_hosp"] = np.round(100 * expit(coefficients[0] + coefficients[1] * proxy.ili), 2)
+    proxy["fitted"] = coefficients[0] + coefficients[1] * proxy.ili
+    parts = []
+    for name, weeks in proxy.groupby("location_name", sort=False):
+        rank = weeks.fitted.rank(method="average").to_numpy() / (len(weeks) + 1)
+        values = observed.loc[observed.location_name.eq(name), "total_hosp"].to_numpy()
+        parts.append(pd.Series(np.round(np.quantile(values, rank), 2), index=weeks.index))
+    proxy["total_hosp"] = pd.concat(parts)
     proxy["date"] += pd.Timedelta(days=728)
     return proxy[["location_name", "date", "total_hosp"]], {
         "mode": "ilinet_proxy", "proxy_rows": len(proxy), "mapping_rows": len(paired),
         "mapping_locations": int(paired.location_name.nunique()), "coefficients": coefficients.tolist(),
+        "values": "quantile-mapped to each location's observed NSSP distribution",
         "source_end": "2019-06-30", "shift_days": 728, "response_transform": transform}
 
 
@@ -373,7 +383,7 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
             model["total_hosp"] *= 100  # predictors in percentage points; response link uses proportions
             mode = settings["ed_history"]["mode"]
             if mode == "ilinet_proxy":
-                proxy, audit["ed_reconstruction"] = ed_ilinet_proxy(root, model, settings["ed_target_transform"])
+                proxy, audit["ed_reconstruction"] = ed_ilinet_proxy(root, model[model.date.le(anchor)], settings["ed_target_transform"])
                 model, n_filled = weekly_grid(model, anchor)
                 proxy, _ = weekly_grid(proxy, proxy.date.max())
                 # Keep the gap between the proxy and observed eras missing rather than interpolated.
