@@ -60,11 +60,14 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch,
     """Exercise orchestration, serializers and guards in a separate project directory."""
     settings, snapshot = synthetic_project(root, tmp_path, with_ordinal=with_ordinal)
     run = run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
+    serial = {p.relative_to(run): p.read_bytes() for p in (run / "model-output").rglob("*.csv")}
     settings["component_workers"] = 2
     write_json(tmp_path / "config/settings.json", settings)
     parallel_run = run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
-    for path in (run / "model-output").rglob("*.csv"):
-        assert path.read_bytes() == (parallel_run / path.relative_to(run)).read_bytes()
+    # The rerun for the same reference date replaced the first run, with identical outputs.
+    assert not run.exists() and [p.name for p in run.parent.iterdir()] == [parallel_run.name]
+    assert serial == {p.relative_to(parallel_run): p.read_bytes() for p in (parallel_run / "model-output").rglob("*.csv")}
+    run = parallel_run
     manifest = verify_run(tmp_path, run)
     assert manifest["validation"]["MIGHTE-Base"]["rows"] == 3 * 2 * 4 * 23 + (3 * 4 * 5 if with_ordinal else 0)
     assert len(manifest["output_hashes"]) == 3 and manifest["notices"] == []
@@ -96,10 +99,12 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch,
         incomplete = read_forecast(cached)
         incomplete[incomplete.location.ne("02") | incomplete.horizon.ne(0)].to_csv(cached, index=False)
         interrupted = json.loads((parallel_run / "manifest.json").read_text())
+        complete = dict(interrupted)
         interrupted["status"] = "running"
         write_json(parallel_run / "manifest.json", interrupted)
         with pytest.raises(ValueError, match="Incomplete forecast coverage.*rate change"):
             run_forecasts(tmp_path, "2026-10-10", resume=parallel_run)
+        write_json(parallel_run / "manifest.json", complete)  # restore for the edit check below
     # Verify mutations to the actual exported artifact are caught.
     path = run / next(iter(manifest["output_hashes"]))
     path.write_text(path.read_text().replace(",quantile,", ",changed,", 1))
@@ -346,3 +351,17 @@ def test_registration_includes_joint_retirement_and_enforces_two_designated(root
         assert len(calls) == 1
         assert set(calls[0]) == {"model-metadata/MIGHTE-Base.yml", "model-metadata/MIGHTE-Linear.yml",
                                  "model-metadata/MIGHTE-Nsemble.yml", "model-metadata/MIGHTE-Joint.yml"}
+
+
+def test_a_completed_run_replaces_earlier_runs_for_the_same_date(tmp_path):
+    from mighte.pipeline import replace_earlier_runs
+    day = tmp_path / "runs/previews/2026-09-26"
+    for name in ["A-submitted", "B-earlier", "C-new"]:
+        (day / name).mkdir(parents=True)
+        (tmp_path / "reports/previews/2026-09-26" / name).mkdir(parents=True)
+    (day / "A-submitted/submission.json").write_text("{}")
+    (tmp_path / "runs/previews/2026-10-03/other").mkdir(parents=True)  # other dates are untouched
+    assert replace_earlier_runs(tmp_path, day / "C-new") == 1
+    assert sorted(p.name for p in day.iterdir()) == ["A-submitted", "C-new"]
+    assert sorted(p.name for p in (tmp_path / "reports/previews/2026-09-26").iterdir()) == ["A-submitted", "C-new"]
+    assert (tmp_path / "runs/previews/2026-10-03/other").exists()

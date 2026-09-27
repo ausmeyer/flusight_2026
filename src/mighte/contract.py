@@ -34,10 +34,12 @@ def reference_saturday(now: datetime | None = None) -> str:
 
 
 def check_window(reference: str, now: datetime | None = None) -> None:
+    """Production runs and submissions: Wednesday noon, after the week's data update, through
+    Thursday 8 AM Eastern, when the hub still accepts submissions."""
     now = (now or datetime.now(EASTERN)).astimezone(EASTERN)
     ref = datetime.fromisoformat(reference).replace(tzinfo=EASTERN)
-    start = ref - timedelta(days=6)
-    deadline = (ref - timedelta(days=3)).replace(hour=23)
+    start = (ref - timedelta(days=3)).replace(hour=12)
+    deadline = (ref - timedelta(days=2)).replace(hour=8)
     if not start <= now <= deadline:
         raise ValueError(f"Submission window: {start.isoformat()} through {deadline.isoformat()}. "
                          "Use preview for an out-of-window rehearsal; it cannot be submitted.")

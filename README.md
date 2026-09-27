@@ -30,7 +30,7 @@ To reopen the latest report:
 ./mighte review --preview
 ```
 
-Data snapshots, forecasts, and reports are saved locally under `data/snapshots/`, `runs/`, and `reports/`.
+Data snapshots, forecasts, and reports are saved locally under `data/snapshots/`, `runs/`, and `reports/`. Rerunning a preview or forecast for the same reference date replaces the earlier run and its report once the new run completes; a submitted run is kept as the record of what the hub received.
 
 ### Windows
 

@@ -63,9 +63,18 @@ def test_ordinal_pmf(root, forecast):
         Contract(root / "hub-contract").validate(pd.concat([forecast, pmf]), "MIGHTE-Base", "2026-10-10")
 
 
-@pytest.mark.parametrize("reference,deadline", [("2026-10-10", "2026-10-07T23:00:00-04:00"),
-                                                ("2026-11-07", "2026-11-04T23:00:00-05:00")])
-def test_eastern_deadline_with_dst(reference, deadline):
-    check_window(reference, datetime.fromisoformat(deadline))
-    with pytest.raises(ValueError):
-        check_window(reference, datetime.fromisoformat(deadline.replace("23:00:00", "23:00:01")))
+@pytest.mark.parametrize("reference,start,deadline", [("2026-10-10", "2026-10-07T12:00:00-04:00", "2026-10-08T08:00:00-04:00"),
+                                                      ("2026-11-07", "2026-11-04T12:00:00-05:00", "2026-11-05T08:00:00-05:00")])
+def test_window_is_wednesday_noon_to_thursday_8am_eastern_with_dst(reference, start, deadline):
+    for inside in [start, deadline]:
+        check_window(reference, datetime.fromisoformat(inside))
+    for outside in [start.replace("12:00:00", "11:59:59"), deadline.replace("08:00:00", "08:00:01")]:
+        with pytest.raises(ValueError, match="Submission window"):
+            check_window(reference, datetime.fromisoformat(outside))
+
+
+@pytest.mark.parametrize("reference", ["2026-09-25", "2026-9-26"])
+def test_runs_refuse_non_flusight_reference_dates_before_any_work(root, reference):
+    from mighte.pipeline import run_forecasts
+    with pytest.raises(ValueError, match="must be a Saturday written YYYY-MM-DD"):
+        run_forecasts(root, reference, preview=True)

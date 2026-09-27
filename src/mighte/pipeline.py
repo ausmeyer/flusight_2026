@@ -4,6 +4,7 @@ import importlib
 import importlib.metadata
 import json
 import platform
+import shutil
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from multiprocessing import get_context
@@ -63,6 +64,10 @@ def fit_component(name, target, signals, run, snapshot, reference, settings, loc
 
 def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
                   resume: Path | None = None, snapshot: Path | None = None) -> Path:
+    if resume is None:  # previews follow the FluSight date convention too
+        day = datetime.strptime(reference, "%Y-%m-%d").date()
+        if day.isoformat() != reference or day.weekday() != 5:
+            raise ValueError(f"Reference date {reference} must be a Saturday written YYYY-MM-DD, as in FluSight")
     settings = json.loads((root / "config/settings.json").read_text())
     if quick and not preview:
         raise ValueError("Reduced fits are permitted only in a non-submittable preview")
@@ -269,8 +274,26 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
     write_json(root / "runs" / ("latest-preview.json" if preview else "latest.json"),
                {"run_id": manifest["run_id"]})
     print(f"Validated {len(forecasts)} model file(s): {run}", flush=True)
+    replaced = replace_earlier_runs(root, run)
+    if replaced:
+        print(f"Replaced {replaced} earlier {'preview' if preview else 'forecast'} run(s) for {reference}", flush=True)
     print_notices(notices)
     return run
+
+
+def replace_earlier_runs(root: Path, run: Path) -> int:
+    """A completed run replaces earlier runs of the same kind and reference date, with their
+    reports. Submitted runs stay: they record what the hub received."""
+    replaced = 0
+    for earlier in sorted(p for p in run.parent.iterdir() if p.is_dir() and p != run):
+        if (earlier / "submission.json").exists():
+            continue
+        shutil.rmtree(earlier)
+        report = root / "reports" / earlier.relative_to(root / "runs")
+        if report.exists():
+            shutil.rmtree(report)
+        replaced += 1
+    return replaced
 
 
 def print_notices(notices: list[str]) -> None:
