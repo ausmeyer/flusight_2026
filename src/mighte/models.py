@@ -17,9 +17,7 @@ from .panel_ar import PanelARRuntime, PanelARSpec, forecast_panel_ar_anchor, pre
 from .util import write_json
 
 
-def pooled_features(history: pd.DataFrame, snapshot: Path, reference: str,
-                    runtime: core.RuntimeConfig, signals: tuple[str, ...], *, shifted=True):
-    features = core.build_feature_table(history, runtime)
+def covariate_sources(snapshot: Path, signals: tuple[str, ...]) -> list[dict]:
     sources = []
     if "ww" in signals:
         sources.append({"file": str(snapshot / "wastewater.csv"),
@@ -30,12 +28,33 @@ def pooled_features(history: pd.DataFrame, snapshot: Path, reference: str,
         sources.append({"file": str(snapshot / "nssp.csv"), "columns": [NSSP],
                         "source_lag_weeks": 0, "max_staleness_weeks": 1,
                         "add_availability_features": True})
-    features = core.add_external_covariate_sources(features, sources, pd.Timestamp(reference),
-                                                    shift_stitched_proxy_dates=shifted)
+    return sources
+
+
+def pooled_features(history: pd.DataFrame, snapshot: Path, reference: str,
+                    runtime: core.RuntimeConfig, signals: tuple[str, ...], *, shifted=True):
+    features = core.build_feature_table(history, runtime)
+    features = core.add_external_covariate_sources(features, covariate_sources(snapshot, signals),
+                                                    pd.Timestamp(reference), shift_stitched_proxy_dates=shifted)
     if "nssp" in signals:
         features = core.add_external_feature_lags(features, {NSSP: [1, 2, 4]})
     pooled = core.build_pooled_examples(features, runtime.max_horizons)
     return pooled, core.feature_columns(pooled)
+
+
+def covariate_weeks(snapshot: Path, reference: str) -> dict:
+    """What the model actually receives at the anchor for each covariate, via the same lookup."""
+    anchor = pd.Timestamp(reference) - pd.Timedelta(weeks=1)
+    row = core.add_external_covariate_sources(pd.DataFrame({"location_name": ["US"], "date": [anchor]}),
+                                               covariate_sources(snapshot, ("ww", "nssp")), pd.Timestamp(reference),
+                                               shift_stitched_proxy_dates=False).iloc[0]
+    weeks = {}
+    for key, column, lag in [("ww", WW, 1), ("nssp", NSSP, 0)]:
+        available = bool(row[f"{column}_available"])
+        used = anchor - pd.Timedelta(weeks=lag + int(row[f"{column}_age_weeks"])) if available else None
+        weeks[key] = {"available": available, "expected_week": (anchor - pd.Timedelta(weeks=lag)).date().isoformat(),
+                      "week_used": used.date().isoformat() if available else None}
+    return weeks
 
 
 def distributional(history: pd.DataFrame, snapshot: Path, reference: str, settings: dict,

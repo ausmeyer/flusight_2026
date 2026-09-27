@@ -109,13 +109,14 @@ class Contract:
                 if output_type == "pmf" and (not np.isclose(unit.value.sum(), 1, atol=1e-8)
                                               or (unit.value > 1).any()):
                     raise ValueError("Category probabilities must be in [0,1] and sum to one")
+            maximum = task["output_type"][output_type]["value"].get("maximum")
+            if maximum is not None and (g.value > maximum).any():
+                raise ValueError(f"{target} values exceed the hub maximum of {maximum}")
             if target == HOSP:
                 if not np.equal(g.value, np.floor(g.value)).all():
                     raise ValueError("Hospitalization forecasts must be integer-valued")
-                if (g.value > g.location.map(self.population) * .30).any():
-                    raise ValueError("Hospitalization quantile exceeds the hub's 30%-of-population bound")
-            if target == ED and (g.value > .25).any():
-                raise ValueError("ED quantile exceeds the hub's 0.25 plausibility bound; inspect the fit")
+                if (g.value > g.location.map(self.population)).any():
+                    raise ValueError("Hospitalization quantile exceeds the location's population")
         return {"rows": len(df), "targets": sorted(df.target.unique()),
                 "locations": df.groupby("target").location.nunique().to_dict(), "valid": True}
 

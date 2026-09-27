@@ -276,8 +276,8 @@ LABELS = {HOSP: "Hospital admissions", ED: "ED visits"}
 def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -> tuple[dict, dict]:
     """Training histories and input availability.
 
-    Every location reported in the past year is forecast. Locations without an anchor value, and
-    covariates beyond the staleness limit, are recorded so the pipeline can use its fallback.
+    Every location reported in the past year is forecast. Locations without an anchor value are
+    recorded so the pipeline can use its fallback.
     """
     epsilon = boundary_epsilon(settings["ed_target_transform"])
     anchor = pd.Timestamp(reference) - pd.Timedelta(weeks=1)
@@ -299,7 +299,10 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
             notices.append(f"{LABELS[target]}: nothing reported in the past year; target omitted")
             continue
         if missing:
-            which = "all locations" if len(missing) == len(expected) else ", ".join(names[x] for x in missing)
+            dates = sorted(set(missing.values()))
+            which = (f"all locations (last reported {dates[0]}{'' if len(dates) == 1 else ' to ' + dates[-1]})"
+                     if len(missing) == len(expected) else ", ".join(f"{names[x]} (last reported {day})"
+                                                                    for x, day in missing.items()))
             notices.append(f"{LABELS[target]}: no {anchor.date()} value for {which}; forecast by MIGHTE-Base "
                            "without wastewater and NSSP from the last reported value")
         model = observed[["location_name", "date", "value"]].rename(columns={"value": "total_hosp"})
@@ -328,20 +331,5 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
                 "boundary_policy": "Clip response-link inputs only; do not alter truth or predictor history"}
         inputs[target] = model
         audit[target].update(training_rows=len(model), interpolated_training_values=n_filled)
-    week = pd.Timedelta(weeks=1)
-    nssp = pd.read_csv(snapshot / "nssp.csv", parse_dates=["date"])
-    ww = pd.read_csv(snapshot / "wastewater.csv", parse_dates=["date"])
-    covariates = {}
-    # Frozen recipe: NSSP through the anchor, wastewater through the week before; each may be one week stale.
-    for key, label, frame, column, expected in [("nssp", "National NSSP", nssp, NSSP, anchor),
-                                                ("ww", "WastewaterSCAN", ww, WW, anchor - week)]:
-        latest = frame.loc[frame.date.le(expected) & frame[column].notna(), "date"].max()
-        available = pd.notna(latest) and latest >= expected - week
-        covariates[key] = {"available": bool(available), "expected_week": expected.date().isoformat(),
-                           "week_used": latest.date().isoformat() if available else None}
-        if available and latest < expected:
-            notices.append(f"{label} for {expected.date()} not yet available; used {latest.date()} "
-                           "(the model's one-week staleness allowance)")
-    audit["covariates"] = covariates
     audit["notices"] = notices
     return inputs, audit

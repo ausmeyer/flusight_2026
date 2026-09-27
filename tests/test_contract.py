@@ -44,8 +44,14 @@ def test_ed_units_and_combined_file(root, forecast):
     Contract(root / "hub-contract").validate(combined, "MIGHTE-Base", "2026-10-10")
     with pytest.raises(ValueError):
         Contract(root / "hub-contract").validate(combined, "MIGHTE-Linear", "2026-10-10")
-    with pytest.raises(ValueError, match="plausibility"):
-        Contract(root / "hub-contract").validate(pd.concat([forecast, ed.assign(value=.26)]), "MIGHTE-Base", "2026-10-10")
+    # Plausibility limits are flagged for review, not enforced; hub format limits are enforced.
+    implausible = pd.concat([forecast, ed.assign(value=.26)])
+    Contract(root / "hub-contract").validate(implausible, "MIGHTE-Base", "2026-10-10")
+    assert set(Contract(root / "hub-contract").implausible_units(implausible).target) == {ED}
+    with pytest.raises(ValueError, match="maximum"):
+        Contract(root / "hub-contract").validate(pd.concat([forecast, ed.assign(value=1.01)]), "MIGHTE-Base", "2026-10-10")
+    with pytest.raises(ValueError, match="population"):
+        Contract(root / "hub-contract").validate(forecast.assign(value=6_000_000), "MIGHTE-Base", "2026-10-10")
 
 
 def test_ordinal_pmf(root, forecast):

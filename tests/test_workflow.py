@@ -112,8 +112,8 @@ def locations(run, model, target):
     return {h: set(g.location) for h, g in frame[frame.target.eq(target)].groupby("horizon")}
 
 
-SCENARIOS = ["location", "all_hospital_anchors", "nssp_stale", "nssp_missing", "ww_missing", "ed_release",
-             "plausibility"]
+SCENARIOS = ["location", "all_hospital_anchors", "nssp_stale", "nssp_missing", "nssp_blank", "ww_missing",
+             "ed_release", "plausibility"]
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
@@ -132,6 +132,8 @@ def test_missing_inputs_use_the_fallback_without_omitting_forecasts(root, tmp_pa
             truth = truth[~(truth.target.eq(ED) & truth.date.eq(ANCHOR))]
         if scenario == "nssp_missing":
             nssp = nssp[nssp.date.lt(ANCHOR - week)]
+        if scenario == "nssp_blank":  # the newest row exists but is empty, so the model would receive NaN
+            nssp.loc[nssp.date.eq(ANCHOR), NSSP] = np.nan
         if scenario == "ww_missing":
             ww = ww[ww.date.lt(ANCHOR - 2 * week)]
         if scenario == "plausibility":
@@ -159,12 +161,16 @@ def test_missing_inputs_use_the_fallback_without_omitting_forecasts(root, tmp_pa
             frame = read_forecast(run / f"model-output/{model}/2026-10-10-{model}.csv")
             us = frame[frame.target.eq(HOSP) & frame.location.eq("US")]
             np.testing.assert_allclose(ordered(us), np.rint(ordered(fallback[fallback.location.eq("US")])))
-        assert "no 2026-10-03 value for US" in notices and "last reported value" in notices
+        assert "no 2026-10-03 value for US (last reported 2026-09-26)" in notices
+        assert set(component("base-ordinal-fallback").location) == {"US"}
+        assert set(component("base-ordinal").location) == {"01", "02"}
     if scenario == "all_hospital_anchors":
         assert not (run / "components/linear.csv").exists() and "for all locations" in notices
         np.testing.assert_allclose(ordered(base[base.target.eq(HOSP)]), np.rint(ordered(component("fallback-hospitalizations"))))
     if scenario == "nssp_stale":
         assert "used 2026-09-26" in notices and "without wastewater" not in notices
+    if scenario == "nssp_blank":
+        assert "National NSSP unavailable" in notices and not (run / "components/base-hospitalizations.csv").exists()
     if scenario == "nssp_missing":
         assert ("National NSSP unavailable: MIGHTE-Base admissions, the Nsemble NSSP part, MIGHTE-Base trends "
                 "used MIGHTE-Base without wastewater and NSSP") in notices
@@ -177,8 +183,8 @@ def test_missing_inputs_use_the_fallback_without_omitting_forecasts(root, tmp_pa
         assert not (run / "components/base-ed.csv").exists() and set(component("fallback-ed").location) == {"01", "02", "US"}
         assert "ED visits: no 2026-10-03 value for all locations" in notices and "used 2026-09-26" in notices
     if scenario == "plausibility":
-        assert base[base.target.eq(ED)].value.max() == .25
-        assert "MIGHTE-Base ED visits: Alaska h0,1,2,3 capped at the hub's plausibility limit" in notices
+        assert base[base.target.eq(ED)].value.max() > .25  # flagged for review, never altered
+        assert "MIGHTE-Base ED visits: Alaska h0,1,2,3 above the hub's plausibility limit" in notices
 
 
 def test_run_without_any_producible_forecast_fails_loudly(root, tmp_path):

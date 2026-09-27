@@ -15,7 +15,7 @@ from threadpoolctl import threadpool_limits
 
 from .contract import COLUMNS, ED, HOSP, TREND, MODELS, EASTERN, Contract, check_window, read_forecast
 from .data import prepare_inputs, refresh, verify_snapshot
-from .models import distributional, equal_quantiles, linear, persistence_baseline
+from .models import covariate_weeks, distributional, equal_quantiles, linear, persistence_baseline
 from .util import code_hash, digest, utc_now, write_json
 
 
@@ -117,6 +117,12 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
     names = dict(zip(contract.locations.location, contract.locations.location_name))
     histories, audit = prepare_inputs(root, snapshot, reference, settings)
     notices = audit["notices"]
+    audit["covariates"] = covariate_weeks(snapshot, reference)
+    for key, label in [("nssp", "National NSSP"), ("ww", "WastewaterSCAN")]:
+        week = audit["covariates"][key]
+        if week["available"] and week["week_used"] != week["expected_week"]:
+            notices.append(f"{label} for {week['expected_week']} not yet available; used {week['week_used']} "
+                           "(the model's one-week staleness allowance)")
     write_json(run / "data-audit.json", audit)
     components = run / "components"
     components.mkdir(exist_ok=True)
@@ -174,32 +180,41 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
             frame = pd.concat([frame, fallback[fallback.location.isin(missing[target])]], ignore_index=True)
         return frame
 
+    def classify(name, signals, locations):
+        path, checkpoint = components / f"{name}.csv", run / "checkpoints" / name
+        if not path.exists():
+            # Use the identical serialized history consumed by the boosted Base fit.
+            history = pd.read_csv(run / "hospitalization-training.csv", parse_dates=["date"])
+            with threadpool_limits(limits=int(settings["threads"])):
+                frame = fn({"reference_date": reference, "snapshot_path": snapshot, "hospitalization_history": history,
+                            "base_hospitalization_quantiles": part(results.get("base-hospitalizations"), HOSP),
+                            "settings": settings, "checkpoint_path": checkpoint, "signals": signals,
+                            "locations": locations})
+            if frame.empty or set(frame.columns) != set(COLUMNS):
+                raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
+            write_forecast(path, frame)
+        frame = read_forecast(path)
+        if frame.empty or set(frame.target) != {TREND} or set(frame.columns) != set(COLUMNS):
+            raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
+        return frame
+
     ordinal = None
     if use_ordinal:
         module, name = settings["ordinal_plugin"].split(":")
         if not module.startswith("mighte."):
             raise ValueError("Keep ordinal plugin code inside this standalone mighte package")
         fn = getattr(importlib.import_module(module), name)
-        ordinal_path = components / "base-ordinal.csv"
-        ordinal_checkpoint = run / "checkpoints/base-ordinal"
-        if not ordinal_path.exists():
-            # Use the identical serialized history consumed by the boosted Base fit.
-            ordinal_history = pd.read_csv(run / "hospitalization-training.csv", parse_dates=["date"])
-            with threadpool_limits(limits=int(settings["threads"])):
-                ordinal = fn({"reference_date": reference, "snapshot_path": snapshot,
-                              "hospitalization_history": ordinal_history,
-                              "base_hospitalization_quantiles": part(results.get("base-hospitalizations"), HOSP),
-                              "settings": settings, "checkpoint_path": ordinal_checkpoint,
-                              "signals": ("ww", "nssp") if all(available.values()) else (),
-                              "locations": [names[x] for x in audit[HOSP]["locations"]]})
-            if ordinal.empty or set(ordinal.columns) != set(COLUMNS):
-                raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
-            write_forecast(ordinal_path, ordinal)
-        ordinal = read_forecast(ordinal_path)
-        if ordinal.empty or set(ordinal.target) != {TREND} or set(ordinal.columns) != set(COLUMNS):
-            raise ValueError("Enabled ordinal plugin must return nonempty hub-format rate-change forecasts")
-        if (ordinal_checkpoint / "fit.json").exists():
-            audit["ordinal"] = json.loads((ordinal_checkpoint / "fit.json").read_text())
+        anchored = [names[x] for x in audit[HOSP]["locations"] if x not in missing[HOSP]]
+        fallback_locations = [names[x] for x in missing[HOSP]]
+        # The fallback (no wastewater or NSSP) classifies locations without an anchor value, and all
+        # locations when a covariate is unavailable.
+        if all(available.values()):
+            calls = [("base-ordinal", ("ww", "nssp"), anchored), ("base-ordinal-fallback", (), fallback_locations)]
+        else:
+            calls = [("base-ordinal", (), anchored + fallback_locations)]
+        ordinal = pd.concat([classify(*call) for call in calls if call[2]], ignore_index=True)
+        if (run / "checkpoints/base-ordinal/fit.json").exists():
+            audit["ordinal"] = json.loads((run / "checkpoints/base-ordinal/fit.json").read_text())
             write_json(run / "data-audit.json", audit)
 
     forecasts = {}
@@ -222,15 +237,13 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
     for model, frame in forecasts.items():
         hosp = frame.target.eq(HOSP)
         frame.loc[hosp, "value"] = np.rint(frame.loc[hosp, "value"])
-        # Quantiles above the hub's plausibility limits (ED 0.25, admissions 30% of population) are capped.
-        limit = np.where(frame.target.eq(ED), .25, np.floor(frame.location.map(contract.population).astype(float) * .30))
-        capped = frame.output_type.eq("quantile") & (frame.value > limit)
-        if capped.any():
-            frame.loc[capped, "value"] = limit[capped.to_numpy()]
-            for target, group in frame[capped].groupby("target"):
-                units = "; ".join(f"{names[location]} h{','.join(str(h) for h in sorted(g.horizon.unique()))}"
-                                  for location, g in group.groupby("location"))
-                notices.append(f"{model} {TARGET_LABELS[target]}: {units} capped at the hub's plausibility limit")
+        # The hub flags quantiles above ED 0.25 or admissions of 30% of population; review, not changed.
+        flagged = contract.implausible_units(frame)
+        for target, group in flagged.groupby("target"):
+            units = "; ".join(f"{names[location]} h{','.join(str(h) for h in sorted(g.horizon))}"
+                              for location, g in group.groupby("location"))
+            notices.append(f"{model} {TARGET_LABELS[target]}: {units} above the hub's plausibility limit; "
+                           "review before submitting")
         targets = {HOSP} | ({ED} if model == "MIGHTE-Base" and ED in histories else set()) | (
             {TREND} if model == "MIGHTE-Base" and ordinal is not None else set())
         for target in targets:
