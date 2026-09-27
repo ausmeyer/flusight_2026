@@ -23,7 +23,7 @@ The [hub's written rules and examples](https://github.com/cdcepi/FluSight-foreca
 
 Change is stable when its absolute rate is strictly below the stable boundary **or** its absolute count is less than ten admissions. Large changes meet or exceed the large boundary after applying that count rule. The remaining nonstable changes are increases or decreases. Categories are `large_decrease`, `decrease`, `stable`, `increase`, `large_increase`.
 
-Historical training counts retain the study's reconstructed ILINet/FluSurv-NET segment; observed counts are used as reported. Categories made from the proxy segment are proxy labels, not official observed historical trend truth. Modern anchors use observed admissions. Evaluation derives labels only from raw observed hospitalization truth at both required weeks, with the population frozen for that forecast. Missing observations are not reconstructed for scoring.
+Historical training counts use the leveled hospitalization history in DATA.md, including the reconstructed ILINet/FluSurv-NET segment. Categories made from the proxy segment are proxy labels, not official observed historical trend truth. Modern anchors use observed admissions. Evaluation derives labels only from raw observed hospitalization truth at both required weeks, with the population frozen for that forecast. Missing observations are not reconstructed for scoring.
 
 ## Output and checks
 

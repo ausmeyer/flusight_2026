@@ -234,13 +234,77 @@ def weekly_grid(frame: pd.DataFrame, anchor: pd.Timestamp, *, interpolate=True) 
     return pd.concat(parts, ignore_index=True), interpolated
 
 
-def hospitalization_history(root: Path, observed: pd.DataFrame, anchor: pd.Timestamp) -> tuple[pd.DataFrame, int]:
-    """ILINet/FluSurv proxy seed through June 2021 (dates shifted 728 days), then NHSN counts as reported."""
+# Reporting eras of the hospitalization history. Each earlier era is leveled to the current NHSN
+# regime (mandatory reporting from November 2024).
+CURRENT_REGIME = pd.Timestamp("2024-11-01")
+MANDATORY_REPORTING = (pd.Timestamp("2022-02-01"), pd.Timestamp("2024-04-30"))
+VOLUNTARY_REPORTING = (pd.Timestamp("2024-05-01"), pd.Timestamp("2024-09-30"))
+IN_SEASON, OFF_SEASON = [11, 12, 1, 2, 3, 4], [5, 6, 7, 8, 9]
+LEVEL_BOUNDS = (0.5, 2.0)
+# The log level changes linearly over the four weeks around the seed/NHSN splice, the four weeks
+# after mandatory reporting ended, and the five weeks in which hospitals resumed reporting before
+# the November 2024 mandate.
+LEVEL_RAMPS = [("2021-06-12", "2021-07-10"), ("2024-04-27", "2024-05-25"), ("2024-09-28", "2024-11-02")]
+
+
+def era_levels(observed: pd.DataFrame, predictor: pd.DataFrame) -> pd.DataFrame:
+    """Multipliers that put each era on the current NHSN level.
+
+    Levels are volume-weighted ratios of reported admissions to the ILINet/FluSurv predictor over
+    matching seasons. The seed takes the location's current in-season (Nov-Apr) ratio; NHSN from
+    July 2021 to April 2024 takes that ratio over the mandatory-reporting in-season ratio; the
+    voluntary period takes one national factor, the US current off-season (May-Sep) ratio over the
+    voluntary ratio, because several states nearly stopped reporting. Levels are 1 without eight
+    current and 26 mandatory in-season weeks (eight off-season weeks each for the national factor).
+    """
+    paired = observed[observed.date.ge("2021-07-01")].merge(predictor, on=["location_name", "date"], validate="one_to_one")
+    ratio = lambda g: g.total_hosp.sum() / g.proxy_hosp_continuous.sum()
+    month = paired.date.dt.month
+    current = paired[paired.date.ge(CURRENT_REGIME) & month.isin(IN_SEASON)]
+    mandatory = paired[paired.date.between(*MANDATORY_REPORTING) & month.isin(IN_SEASON)]
+    us = paired[paired.location_name.eq("US")]
+    us_off = us[us.date.ge(CURRENT_REGIME) & us.date.dt.month.isin(OFF_SEASON)]
+    us_voluntary = us[us.date.between(*VOLUNTARY_REPORTING)]
+    voluntary = ratio(us_off) / ratio(us_voluntary) if len(us_off) >= 8 and len(us_voluntary) >= 8 else 1.0
+    rows = []
+    for name in sorted(observed.location_name.unique()):
+        c, m = current[current.location_name.eq(name)], mandatory[mandatory.location_name.eq(name)]
+        enough = len(c) >= 8 and len(m) >= 26
+        rows.append({"location_name": name, "seed": ratio(c) if enough else 1.0,
+                     "legacy": ratio(c) / ratio(m) if enough else 1.0, "voluntary": voluntary,
+                     "current_in_season_weeks": len(c), "mandatory_in_season_weeks": len(m)})
+    levels = pd.DataFrame(rows)
+    levels[["seed", "legacy", "voluntary"]] = levels[["seed", "legacy", "voluntary"]].clip(*LEVEL_BOUNDS)
+    return levels
+
+
+def level_history(history: pd.DataFrame, levels: pd.DataFrame) -> pd.DataFrame:
+    """Apply the levels in log1p space, like the study's shift; the current regime is never changed."""
+    x = [pd.Timestamp(day).toordinal() for ramp in LEVEL_RAMPS for day in ramp]
+    out = history.reset_index(drop=True).copy()
+    shift = np.zeros(len(out))
+    factors = levels.set_index("location_name")
+    for name, rows in out.groupby("location_name").indices.items():
+        f = factors.loc[name]
+        y = np.log([f.seed, f.legacy, f.legacy, f.voluntary, f.voluntary, 1.0])
+        shift[rows] = np.interp(out.date.iloc[rows].map(pd.Timestamp.toordinal), x, y)
+    moved = shift != 0
+    out.loc[moved, "total_hosp"] = np.rint(np.maximum(np.expm1(np.log1p(out.total_hosp[moved].clip(lower=0)) + shift[moved]), 0))
+    return out
+
+
+def hospitalization_history(root: Path, observed: pd.DataFrame, anchor: pd.Timestamp) -> tuple[pd.DataFrame, int, pd.DataFrame]:
+    """ILINet/FluSurv seed through June 2021 (dates shifted 728 days), then NHSN counts, with each
+    era leveled to the current NHSN regime from data available at the anchor."""
     observed = observed[observed.date.le(anchor)]
     seed = pd.read_csv(root / "data/historical/hospitalization_proxy.csv", parse_dates=["date"])
     seed = seed[seed.location_name.isin(observed.location_name.unique()) & seed.date.le(anchor)]
     model = pd.concat([seed, observed[observed.date.ge("2021-07-01")]], ignore_index=True)
-    return weekly_grid(model[["location_name", "date", "total_hosp"]], anchor)
+    history, filled = weekly_grid(model[["location_name", "date", "total_hosp"]], anchor)
+    predictor = pd.read_csv(root / "data/historical/hospitalization_calibration.csv", parse_dates=["date"],
+                            float_precision="round_trip")
+    levels = era_levels(observed, predictor[predictor.date.le(anchor)])
+    return level_history(history, levels), filled, levels
 
 
 def ed_ilinet_proxy(root: Path, observed: pd.DataFrame, transform: dict) -> tuple[pd.DataFrame, dict]:
@@ -303,7 +367,8 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
                            "without wastewater and NSSP from the last reported value")
         model = observed[["location_name", "date", "value"]].rename(columns={"value": "total_hosp"})
         if target == HOSP:
-            model, n_filled = hospitalization_history(root, model, anchor)
+            model, n_filled, levels = hospitalization_history(root, model, anchor)
+            audit["hospitalization_levels"] = levels.round(4).to_dict("records")
         else:
             model["total_hosp"] *= 100  # predictors in percentage points; response link uses proportions
             mode = settings["ed_history"]["mode"]

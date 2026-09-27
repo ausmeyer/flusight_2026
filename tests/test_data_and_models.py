@@ -136,21 +136,53 @@ def test_ed_history_is_built_from_ilinet_like_hospitalizations(root):
         ed_ilinet_proxy(root, observed.head(10)[["location_name", "date", "total_hosp"]], ED_TRANSFORM)
 
 
-def test_hospitalization_history_uses_reported_counts(tmp_path):
-    directory = tmp_path / "data/historical"
+def historical_inputs(root, dates, locations):
+    """Seed of 40 admissions a week before July 2021 and an ILINet predictor of 100 every week."""
+    directory = root / "data/historical"
     directory.mkdir(parents=True)
-    pd.DataFrame({"date": ["2021-06-19", "2021-06-26"], "location_name": "A", "total_hosp": [40., 50.]}).to_csv(
+    seed_dates = pd.date_range("2021-05-01", "2021-06-26", freq="W-SAT")
+    pd.DataFrame([{"date": d, "location_name": n, "total_hosp": 40.} for n in locations for d in seed_dates]).to_csv(
         directory / "hospitalization_proxy.csv", index=False)
-    dates = pd.date_range("2021-07-03", "2025-03-29", freq="W-SAT")
-    observed = pd.DataFrame({"date": dates, "location_name": "A", "total_hosp": np.arange(len(dates), dtype=float)})
-    observed.loc[5, "total_hosp"] = np.nan
+    pd.DataFrame([{"date": d, "location_name": n, "proxy_hosp_continuous": 100.} for n in locations for d in dates]).to_csv(
+        directory / "hospitalization_calibration.csv", index=False)
+
+
+def test_hospitalization_history_levels_each_era_to_the_current_regime(tmp_path):
+    dates = pd.date_range("2021-07-03", "2025-12-27", freq="W-SAT")
+    historical_inputs(tmp_path, dates, ["A", "B", "US"])
+    # Admissions per unit of predictor: 1.2 before May 2024, 1.25 while reporting was voluntary,
+    # then 1.8 in season and 1.5 off season under the current regime. B reports four times as many.
+    y = np.where(dates >= "2024-11-01", np.where(dates.month.isin([11, 12, 1, 2, 3, 4]), 180., 150.), 120.)
+    y = np.where((dates >= "2024-05-01") & (dates <= "2024-09-30"), 125., y)
+    observed = pd.concat([pd.DataFrame({"date": dates, "location_name": n, "total_hosp": y * (4 if n == "B" else 1)})
+                          for n in ["A", "B", "US"]], ignore_index=True)
+    observed.loc[observed.date.eq("2025-01-04"), "total_hosp"] += 0.25
     original = observed.copy()
-    history, filled = hospitalization_history(tmp_path, observed, dates[-2])
-    get = lambda day: history.loc[history.date.eq(pd.Timestamp(day)), "total_hosp"].item()
-    assert get("2021-06-26") == 50
-    # Reported counts are used unchanged, with no step at the former adjustment boundaries.
-    for day in ["2022-10-01", "2024-04-27", "2024-05-04", "2024-11-02"]:
-        assert get(day) == observed.loc[observed.date.eq(day), "total_hosp"].item()
-    assert filled == 1 and get(dates[5]) == 5
-    assert history.date.max() == dates[-2]
+    history, filled, levels = hospitalization_history(tmp_path, observed, dates[-1])
+    f = levels.set_index("location_name")
+    assert f.loc["A", ["seed", "legacy", "voluntary"]].tolist() == pytest.approx([1.8, 1.5, 1.2], rel=1e-3)
+    assert f.loc["B", "seed"] == 2.0 and f.loc["B", "legacy"] == pytest.approx(1.5, rel=1e-3)  # bounded
+    get = lambda day: history.loc[history.location_name.eq("A") & history.date.eq(pd.Timestamp(day)), "total_hosp"].item()
+    level = lambda value, factor: np.rint(np.expm1(np.log1p(value) + np.log(factor)))
+    a = f.loc["A"]
+    assert get("2021-06-05") == level(40, a.seed)
+    assert get("2021-06-26") == level(40, np.sqrt(a.seed * a.legacy))  # halfway through the splice ramp
+    assert get("2023-01-07") == level(120, a.legacy)
+    assert get("2024-07-06") == level(125, a.voluntary)
+    assert get("2024-10-12") == level(120, a.voluntary ** (1 - 14 / 35))  # hospitals resuming reporting
+    # The current regime is exactly as reported, even values that are not whole counts.
+    current = history[history.date.ge("2024-11-02")].merge(observed, on=["location_name", "date"])
+    assert len(current) == 3 * 61 and current.total_hosp_x.eq(current.total_hosp_y).all()
+    assert filled == 0 and history.date.max() == dates[-1]
     pd.testing.assert_frame_equal(observed, original)
+
+
+def test_history_is_not_leveled_before_eight_current_regime_weeks(tmp_path):
+    dates = pd.date_range("2021-07-03", "2024-12-14", freq="W-SAT")
+    historical_inputs(tmp_path, dates, ["A"])
+    observed = pd.DataFrame({"date": dates, "location_name": "A", "total_hosp": 100.})
+    observed.loc[5, "total_hosp"] = np.nan
+    history, filled, levels = hospitalization_history(tmp_path, observed, dates[-1])
+    assert levels[["seed", "legacy", "voluntary"]].iloc[0].tolist() == [1.0, 1.0, 1.0]
+    assert filled == 1 and history.loc[history.date.ge("2021-07-03"), "total_hosp"].eq(100).all()
+    assert history.loc[history.date.lt("2021-07-03"), "total_hosp"].eq(40).all()
