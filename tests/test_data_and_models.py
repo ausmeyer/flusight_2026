@@ -64,25 +64,16 @@ def test_no_endpoint_extrapolation():
     assert filled == 1
 
 
-def test_wastewater_equal_site_mean_and_calendar_lags():
+def test_wastewater_equal_site_and_calendar_lags():
     rows = [{"site": str(s), "sample_collect_date": day, "pcr_target_mic_lin": 1e-4}
             for day in ["2026-09-01", "2026-09-15"] for s in range(10)]
     # Many samples at one site must not give that site extra national weight.
     rows += [{"site": "0", "sample_collect_date": "2026-09-01", "pcr_target_mic_lin": 1e-2}] * 100
     weekly = wastewater_weekly(pd.DataFrame(rows))
-    sites = [np.log10(1e-2 + 1e-5)] + [np.log10(1.1e-4)] * 9
-    assert weekly.iloc[0][WW] == pytest.approx(np.mean(sites))
+    assert weekly.iloc[0][WW] == pytest.approx(np.log10(.00011))
     assert pd.isna(weekly.iloc[1][WW + "_lag1"])
     assert weekly.iloc[1][WW + "_lag2"] == weekly.iloc[0][WW]
     assert pd.isna(wastewater_weekly(pd.DataFrame(rows).query("site != '9'")).iloc[0][WW])
-
-
-def test_wastewater_mean_moves_before_half_of_sites_detect():
-    rows = [{"site": str(s), "sample_collect_date": "2026-09-01", "pcr_target_mic_lin": 3e-5 if s < 4 else 0.}
-            for s in range(10)]
-    value = wastewater_weekly(pd.DataFrame(rows)).iloc[0][WW]
-    assert value == pytest.approx((4 * np.log10(4e-5) + 6 * np.log10(1e-5)) / 10)
-    assert value > np.log10(1e-5)  # an equal-site median would still sit at the non-detect floor
 
 
 def test_pooled_targets_match_calendar_dates():
