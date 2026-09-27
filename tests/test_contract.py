@@ -78,3 +78,16 @@ def test_runs_refuse_non_flusight_reference_dates_before_any_work(root, referenc
     from mighte.pipeline import run_forecasts
     with pytest.raises(ValueError, match="must be a Saturday written YYYY-MM-DD"):
         run_forecasts(root, reference, preview=True)
+
+
+@pytest.mark.parametrize("now,reference", [
+    ("2026-09-26T21:00:00-04:00", "2026-09-26"),  # data through 9/19 are out; 9/26 is released 9/30
+    ("2026-09-27T10:00:00-04:00", "2026-09-26"),
+    ("2026-09-30T11:59:59-04:00", "2026-09-26"),  # before Wednesday noon the previous round stays current
+    ("2026-09-30T12:00:00-04:00", "2026-10-03"),
+    ("2026-10-01T08:00:00-04:00", "2026-10-03"),
+    ("2026-10-06T23:00:00-04:00", "2026-10-03"),
+    ("2026-11-04T12:00:00-05:00", "2026-11-07")])   # after the switch to standard time
+def test_default_reference_date_follows_the_wednesday_data_release(now, reference):
+    from mighte.contract import reference_saturday
+    assert reference_saturday(datetime.fromisoformat(now)) == reference
