@@ -191,6 +191,17 @@ def test_an_unreleased_week_stops_the_run_instead_of_carrying_forward(root, tmp_
         run_forecasts(tmp_path, "2026-10-10", preview=True, snapshot=snapshot)
 
 
+def test_preview_without_a_date_anchors_to_the_most_recent_released_week(root, tmp_path):
+    def mutate(truth, nssp, ww):  # ED lags hospitalizations by a week
+        return truth[~(truth.target.eq(ED) & truth.date.eq(ANCHOR))], nssp, ww
+
+    _, snapshot = synthetic_project(root, tmp_path, with_ordinal=False, mutate=mutate)
+    run = run_forecasts(tmp_path, None, preview=True, snapshot=snapshot)
+    manifest = verify_run(tmp_path, run)
+    assert manifest["reference_date"] == "2026-10-03" and run.parent.name == "2026-10-03"
+    assert not any("no 2026-09-26 value" in notice for notice in manifest["notices"])  # nothing carried forward
+
+
 def test_run_without_any_producible_forecast_fails_loudly(root, tmp_path):
     def mutate(truth, nssp, ww):
         return truth[truth.target.ne(HOSP)], nssp, ww

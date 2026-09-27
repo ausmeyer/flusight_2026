@@ -29,9 +29,8 @@ def read_forecast(path: Path) -> pd.DataFrame:
 
 
 def reference_saturday(now: datetime | None = None) -> str:
-    """The latest round whose data are out: the Saturday after the most recent Wednesday noon
-    (Eastern), when data through the previous Saturday are released. Until then the previous
-    round stays current, so an unreleased week never reads as missing."""
+    """The round open for submission: the Saturday after the most recent Wednesday noon
+    (Eastern), when data through the previous Saturday are released. Used by forecast."""
     now = (now or datetime.now(EASTERN)).astimezone(EASTERN)
     wednesday = now.date() - timedelta(days=(now.weekday() - 2) % 7)
     if now < datetime.combine(wednesday, time(12), tzinfo=EASTERN):

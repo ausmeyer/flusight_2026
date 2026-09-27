@@ -70,7 +70,8 @@ def main():
             print(register(root))
             return
         if args.command in {"forecast", "preview", "resume"}:
-            run = run_forecasts(root, getattr(args, "reference_date", None) or reference_saturday(),
+            run = run_forecasts(root, getattr(args, "reference_date", None)
+                                or (None if args.command == "preview" else reference_saturday()),
                                 preview=args.command == "preview", quick=getattr(args, "quick", False),
                                 resume=args.run if args.command == "resume" else None,
                                 snapshot=getattr(args, "snapshot", None))

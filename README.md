@@ -18,7 +18,7 @@ cd flusight_2026
 
 Setup creates a local `.venv` and installs the dependencies in [pyproject.toml](pyproject.toml). If [uv](https://docs.astral.sh/uv/) is installed, it uses [uv.lock](uv.lock). No separate requirements file or neighboring project is needed.
 
-The quick run downloads current data, fits reduced models, and opens an interactive forecast report in your browser. Without `--reference-date`, a run forecasts the latest round whose data are out: the Saturday after the most recent Wednesday noon (Eastern), when data through the previous Saturday are released. Until then the previous round stays current. To run the full models:
+The quick run downloads current data, fits reduced models, and opens an interactive forecast report in your browser. Without `--reference-date`, a preview anchors to the most recent week with released data for both targets and forecasts the following Saturday; a location missing that week is carried forward. `./mighte forecast` uses the round open for submission (Wednesday noon to Thursday 8 AM Eastern) and stops if that week's data are not out yet. To run the full models:
 
 ```bash
 ./mighte preview

@@ -15,7 +15,7 @@ import pandas as pd
 from threadpoolctl import threadpool_limits
 
 from .contract import COLUMNS, ED, HOSP, TREND, MODELS, EASTERN, Contract, check_window, read_forecast
-from .data import prepare_inputs, refresh, verify_snapshot
+from .data import latest_released_reference, prepare_inputs, refresh, verify_snapshot
 from .models import covariate_weeks, distributional, equal_quantiles, linear, persistence_baseline
 from .util import code_hash, digest, utc_now, write_json
 
@@ -62,12 +62,18 @@ def fit_component(name, target, signals, run, snapshot, reference, settings, loc
     return read_forecast(path)
 
 
-def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
+def check_reference_date(reference: str) -> None:
+    """Previews follow the FluSight date convention too."""
+    day = datetime.strptime(reference, "%Y-%m-%d").date()
+    if day.isoformat() != reference or day.weekday() != 5:
+        raise ValueError(f"Reference date {reference} must be a Saturday written YYYY-MM-DD, as in FluSight")
+
+
+def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=False,
                   resume: Path | None = None, snapshot: Path | None = None) -> Path:
-    if resume is None:  # previews follow the FluSight date convention too
-        day = datetime.strptime(reference, "%Y-%m-%d").date()
-        if day.isoformat() != reference or day.weekday() != 5:
-            raise ValueError(f"Reference date {reference} must be a Saturday written YYYY-MM-DD, as in FluSight")
+    """A preview without a reference date anchors to the most recent week with released data."""
+    if resume is None and reference is not None:
+        check_reference_date(reference)
     settings = json.loads((root / "config/settings.json").read_text())
     if quick and not preview:
         raise ValueError("Reduced fits are permitted only in a non-submittable preview")
@@ -92,6 +98,9 @@ def run_forecasts(root: Path, reference: str, *, preview=False, quick=False,
             if reference not in Contract(root / "hub-contract").by_target[HOSP]["task_ids"]["reference_date"]["optional"]:
                 raise ValueError("Reference date is outside FluSight rounds. Use ./mighte preview before the season.")
         snapshot = snapshot or refresh(root)
+        if reference is None:
+            reference = latest_released_reference(snapshot)
+            check_reference_date(reference)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         run = root / "runs" / ("previews" if preview else "prospective") / reference / stamp
         run.mkdir(parents=True)

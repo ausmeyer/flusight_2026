@@ -203,6 +203,13 @@ def refresh(root: Path) -> Path:
         raise
 
 
+def latest_released_reference(snapshot: Path) -> str:
+    """The Saturday after the most recent week with released data for both targets."""
+    truth = pd.read_csv(snapshot / "truth.csv", parse_dates=["date"])
+    anchor = truth.dropna(subset=["value"]).groupby("target").date.max().min()
+    return (anchor + pd.Timedelta(weeks=1)).date().isoformat()
+
+
 def latest_snapshot(root: Path) -> Path:
     pointer = root / "data/latest.json"
     if not pointer.exists():
