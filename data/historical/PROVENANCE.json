@@ -9,14 +9,14 @@
   },
   "hospitalization_proxy": {
     "rows": 24691,
-    "meaning": "ILINet/FluSurv training proxy: original log(rate+1) regression, rate rounded to 2 decimals, original population, count rounding, dates through 2019-06-30 shifted 728 days. Stored unleveled; each era is leveled to the current NHSN regime at forecast time."
+    "meaning": "ILINet/FluSurv training proxy: original log(rate+1) regression, rate rounded to 2 decimals, original population, count rounding, dates through 2019-06-30 shifted 728 days. Stored as produced; at forecast time each seed week takes the value at its rank in the location's leveled NHSN history."
   },
   "hospitalization_calibration": {
     "rows": 43506,
     "regression_rows": 2740,
     "intercept": 0.5253182615607082,
     "slope": 0.5895968464296275,
-    "meaning": "Unshifted ILINet/FluSurv predictor counts before count rounding, every week through April 2026 (frozen). The yardstick for leveling each era of the hospitalization history to the current NHSN regime."
+    "meaning": "Unshifted ILINet/FluSurv predictor counts before count rounding, every week through April 2026 (frozen). The yardstick for leveling the NHSN eras before November 2024 to the current regime."
   },
   "ilinet_normalized": {
     "meaning": "Original per-location bestNormalize(ILI+1) values from the April 25, 2026 study input. These are transformed inputs, not raw percentages. Also used to build the ED training history: a pooled ED log-odds regression orders the weeks through 2019-06-30, values are quantile-mapped to each location's observed NSSP, and dates shift 728 days."
