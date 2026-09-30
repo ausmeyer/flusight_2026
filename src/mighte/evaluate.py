@@ -78,6 +78,15 @@ def official_runs(root: Path) -> list[Path]:
     return [value[1] for _, value in sorted(selected.items())]
 
 
+def preview_runs(root: Path) -> dict[str, Path]:
+    """The latest complete preview for each reference date (shown in preview reports, never scored)."""
+    latest = {}
+    for path in sorted((root / "runs/previews").glob("*/*/manifest.json")):
+        if json.loads(path.read_text()).get("status") == "complete":
+            latest[path.parent.parent.name] = path.parent
+    return latest
+
+
 def load_archive(root: Path) -> pd.DataFrame:
     frames = []
     for run in official_runs(root):

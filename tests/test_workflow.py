@@ -8,7 +8,7 @@ import pytest
 
 from mighte.contract import ED, HOSP, TREND, UNIT, read_forecast
 from mighte.data import NSSP, WW
-from mighte.evaluate import load_archive, official_runs
+from mighte.evaluate import load_archive, official_runs, preview_runs
 from mighte.pipeline import run_forecasts, verify_run
 from mighte.report import build_report
 from mighte.submit import create_pr
@@ -110,6 +110,26 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch,
     path.write_text(path.read_text().replace(",quantile,", ",changed,", 1))
     with pytest.raises(ValueError, match="edited after validation"):
         verify_run(tmp_path, run)
+
+
+def test_preview_reports_offer_every_preview_week_on_disk(root, tmp_path):
+    _, snapshot = synthetic_project(root, tmp_path, with_ordinal=False)
+    runs = {day: run_forecasts(tmp_path, day, preview=True, snapshot=snapshot) for day in ["2026-10-03", "2026-10-10"]}
+    write_json(tmp_path / "data/latest.json", {"snapshot_id": snapshot.name})
+    for run in runs.values():
+        payload = json.loads((build_report(tmp_path, run, online=False).parent / "report-data.json").read_text())
+        assert {row["reference_date"] for row in payload["forecasts"]} == set(runs)
+        assert payload["scores"] == []
+
+
+def test_preview_weeks_are_the_latest_complete_run_per_date(tmp_path):
+    base = tmp_path / "runs/previews"
+    for day, stamp, status in [("2026-09-26", "20260927T061533Z", "complete"),
+                               ("2026-10-03", "20260930T200838Z", "complete"),
+                               ("2026-10-03", "20260930T230000Z", "running")]:
+        write_json(base / day / stamp / "manifest.json", {"status": status})
+    assert preview_runs(tmp_path) == {"2026-09-26": base / "2026-09-26/20260927T061533Z",
+                                      "2026-10-03": base / "2026-10-03/20260930T200838Z"}
 
 
 def locations(run, model, target):

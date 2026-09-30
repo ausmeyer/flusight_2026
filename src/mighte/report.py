@@ -11,7 +11,7 @@ from plotly.offline import get_plotlyjs
 
 from .contract import CATEGORIES, HOSP, TREND, UNIT, Contract, read_forecast
 from .data import latest_snapshot, verify_snapshot
-from .evaluate import LOCAL_BASELINE, TREND_BASELINE, discover_benchmarks, evaluate, summarize
+from .evaluate import LOCAL_BASELINE, TREND_BASELINE, discover_benchmarks, evaluate, preview_runs, summarize
 from .pipeline import verify_run
 from .util import digest, utc_now, write_json
 
@@ -37,20 +37,27 @@ def build_report(root: Path, run: Path, *, online=True) -> Path:
     manifest = verify_run(root, run)
     snapshot = latest_snapshot(root)
     verify_snapshot(snapshot)
+    # A preview report also shows the other previews on disk, one per reference date, for browsing.
+    previews = {day: path for day, path in preview_runs(root).items()
+                if manifest["preview"] and day != manifest["reference_date"]}
     season_references = Contract(snapshot / "contract").by_target[HOSP]["task_ids"]["reference_date"]["optional"]
     catalog, catalog_status = discover_benchmarks(root, season_references,
                                                  season=manifest["settings"]["season"], online=online)
     comparison_models = sorted({f["model"] for f in catalog["files"]} if catalog else [])
-    scores, benchmark_status, archive = evaluate(root, snapshot, online=online,
-                                                comparison_references=[manifest["reference_date"]], catalog=catalog)
+    scores, benchmark_status, archive = evaluate(root, snapshot, online=online, catalog=catalog,
+                                                comparison_references=[manifest["reference_date"], *previews])
     current = pd.concat([read_forecast(run / filename).assign(model_id=Path(filename).parent.name)
                          for filename in manifest["output_hashes"]], ignore_index=True)
+    official = set()
     if not archive.empty:
         archive = archive[~(archive.reference_date.eq(manifest["reference_date"])
                             & archive.model_id.isin(current.model_id.unique()))]
-        forecasts = pd.concat([archive, current], ignore_index=True)
-    else:
-        forecasts = current
+        official = set(archive.reference_date[archive.model_id.isin(current.model_id.unique())])
+    # A week with an official forecast shows that forecast instead of a preview.
+    shown = [read_forecast(path / filename).assign(model_id=Path(filename).parent.name)
+             for day, path in previews.items() if day not in official
+             for filename in verify_run(root, path)["output_hashes"]]
+    forecasts = pd.concat(([archive] if not archive.empty else []) + shown + [current], ignore_index=True)
     quantiles = forecasts[forecasts.output_type.eq("quantile")].copy()
     quantiles["output_type_id"] = pd.to_numeric(quantiles.output_type_id)
     quantiles = quantiles[quantiles.output_type_id.isin([.025, .25, .5, .75, .975])]
