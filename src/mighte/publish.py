@@ -13,7 +13,7 @@ from .pipeline import verify_run
 from .submit import gh_json
 from .util import digest, utc_now, write_json
 
-BRANCH = "codex/dashboard"
+BRANCH = "dashboard"
 ARCHIVE = "forecasts"
 SITE_FILES = {"index.html", "publication.json", ".nojekyll"}
 GENERATOR = "mighte-pages-v1"

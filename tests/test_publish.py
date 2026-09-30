@@ -115,7 +115,7 @@ def test_publish_uploads_only_report_and_dispatches_exact_commit(reviewed, monke
             if existing:
                 assert payload["force"] is False
             else:
-                assert payload["ref"] == "refs/heads/codex/dashboard"
+                assert payload["ref"] == "refs/heads/dashboard"
             return None
         pytest.fail(f"Unexpected endpoint: {endpoint}")
 
