@@ -195,12 +195,19 @@ const begin=[start,shiftDate(references[0],-7)].sort()[0],end=[shiftDate(latest,
 const truth=observed.filter(r=>r.date>=begin&&r.date<=end);
 const comparison=D.forecasts.filter(r=>r.target===target&&r.location===loc&&chosen.includes(r.model_id));
 const ymax=Math.max(1e-6,...truth.map(r=>r.value*mult),...comparison.filter(r=>r.target_end_date>=begin&&r.target_end_date<=end).map(r=>r.hi95*mult));
-traces.push({x:truth.map(r=>r.date),y:truth.map(r=>r.value*mult),name:'Observed · revised',mode:'lines+markers',line:{color:'#253e4c',width:2},marker:{size:6},hovertemplate:'Observed: %{y}<extra></extra>'});
+// The hover reads one invisible point per week that lists only that week's values. Unified hover over the
+// drawn series would add each series' nearest point within 20 px, e.g. the first forecast on the last observation.
+const hover={},note=(date,color,label,value)=>(hover[date]=hover[date]||[]).push(`<span style="color:${color}">\u25CF</span> ${label}: ${mult===100?value.toFixed(2):+value.toFixed(2)}`);
+truth.forEach(r=>note(r.date,'#253e4c','Observed',r.value*mult));
+traces.push({x:truth.map(r=>r.date),y:truth.map(r=>r.value*mult),name:'Observed · revised',mode:'lines+markers',line:{color:'#253e4c',width:2},marker:{size:6},hoverinfo:'skip'});
 chosen.forEach(model=>{const rows=comparison.filter(r=>r.reference_date===ref&&r.model_id===model).sort((a,b)=>a.horizon-b.horizon);if(!rows.length)return;
 const c=colors[model]||'#658091',x=rows.map(r=>r.target_end_date);
+rows.forEach(r=>note(r.target_end_date,c,esc(model.replace(/^MIGHTE-/,'')),r.median*mult));
 [['lo95','hi95',.08],['lo50','hi50',.15]].forEach(([lo,hi,a])=>{traces.push({x,y:rows.map(r=>r[lo]*mult),mode:'lines',line:{width:0},showlegend:false,hoverinfo:'skip',legendgroup:model});traces.push({x,y:rows.map(r=>r[hi]*mult),mode:'lines',line:{width:0},fill:'tonexty',fillcolor:rgba(c,a),showlegend:false,hoverinfo:'skip',legendgroup:model})});
-traces.push({x,y:rows.map(r=>r.median*mult),mode:'lines+markers',name:model,legendgroup:model,line:{color:c,width:2.5},marker:{size:8},hovertemplate:`${esc(model.replace(/^MIGHTE-/,''))}: ${mult===100?'%{y:.2f}':'%{y}'}<extra></extra>`})});
-Plotly.react('chart',traces,{margin:{t:25,b:45,l:65,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},uirevision:[target,loc,history,...chosen].join('|'),xaxis:{type:'date',range:[begin,end],gridcolor:'#edf1f3'},yaxis:{title:{text:mult===100?'Influenza ED visits (%)':'Hospital admissions'},range:[0,ymax*1.08],gridcolor:'#edf1f3'},legend:{orientation:'h',y:1.14,maxheight:.25},hovermode:'x unified',shapes:[{type:'line',x0:ref,x1:ref,y0:0,y1:1,yref:'paper',line:{color:'#95a7ae',dash:'dot',width:1}}]},{responsive:true,displaylogo:false});
+traces.push({x,y:rows.map(r=>r.median*mult),mode:'lines+markers',name:model,legendgroup:model,line:{color:c,width:2.5},marker:{size:8},hoverinfo:'skip'})});
+const weeks=Object.keys(hover).sort();
+traces.push({x:weeks,y:weeks.map(()=>0),text:weeks.map(d=>hover[d].join('<br>')),mode:'markers',marker:{opacity:0},showlegend:false,hovertemplate:'%{text}<extra></extra>'});
+Plotly.react('chart',traces,{hoverdistance:-1,margin:{t:25,b:45,l:65,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},uirevision:[target,loc,history,...chosen].join('|'),xaxis:{type:'date',range:[begin,end],gridcolor:'#edf1f3',hoverformat:'%b %-d, %Y'},yaxis:{title:{text:mult===100?'Influenza ED visits (%)':'Hospital admissions'},range:[0,ymax*1.08],gridcolor:'#edf1f3'},legend:{orientation:'h',y:1.14,maxheight:.25},hovermode:'x unified',shapes:[{type:'line',x0:ref,x1:ref,y0:0,y1:1,yref:'paper',line:{color:'#95a7ae',dash:'dot',width:1}}]},{responsive:true,displaylogo:false});
 table();}
 const mean=rows=>rows.length?rows.reduce((a,b)=>a+b,0)/rows.length:null;
 const geom=arr=>arr.length?(arr.includes(0)?0:Math.exp(mean(arr.map(Math.log)))):null;
