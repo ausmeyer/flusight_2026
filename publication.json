@@ -1,13 +1,13 @@
 {
   "generator": "mighte-pages-v1",
-  "run_id": "previews/2026-09-26/20260927T061533950997Z",
-  "reference_date": "2026-09-26",
+  "run_id": "previews/2026-10-03/20260930T200838933452Z",
+  "reference_date": "2026-10-03",
   "preview": true,
-  "report_sha256": "2b94baae20205efe93416225495cf3e7b17a14d4ea4366a6823f0be7de17f514",
+  "report_sha256": "61939e39a1b95eb1bfe9dae37c8f6f51c72e960a0e4689b438f4346b8e3fe5a3",
   "forecast_output_hashes": {
-    "model-output/MIGHTE-Base/2026-09-26-MIGHTE-Base.csv": "a47a8209de33e982829a2aba5df8669fea83d32f9923328f945812cf818eb796",
-    "model-output/MIGHTE-Linear/2026-09-26-MIGHTE-Linear.csv": "95436df22b2ce9eab16c3376b0a02923df2da82f0d9510956a7993fe80d5e0b4",
-    "model-output/MIGHTE-Nsemble/2026-09-26-MIGHTE-Nsemble.csv": "df0f992b1d93656dc55ed4e70262992394e1e26ce69abe6cf8a7a232cd4297e7"
+    "model-output/MIGHTE-Base/2026-10-03-MIGHTE-Base.csv": "0f4601c5930a808ca17bd1db41b8d9a050b0e690202ea9c0bd3b8cfe7e7acdf0",
+    "model-output/MIGHTE-Linear/2026-10-03-MIGHTE-Linear.csv": "cd979ee66e08fe860ee84a7703d5040be14c973f0b084d845debbc0b7716e299",
+    "model-output/MIGHTE-Nsemble/2026-10-03-MIGHTE-Nsemble.csv": "1166ded0b84c6e596a556ea7028d4b316ff0c985fc9972f2264121f32715d44c"
   },
-  "published_at": "2026-09-27T16:59:54.571278+00:00"
+  "published_at": "2026-09-30T22:06:07.946567+00:00"
 }
