@@ -1,0 +1,151 @@
+{
+  "baseline_sha256": "95ff9da4ccb948384185587a53ef52462ee61970bc7f614cfe189a3557b2f63f",
+  "code_sha256": "cd95195cb677337ae3f90469649de56b22fe69edc8f8846a3abd0fdb18d20d12",
+  "completed_at": "2026-09-30T22:02:35.219705+00:00",
+  "created_at": "2026-09-30T20:08:38.933842+00:00",
+  "environment": {
+    "lightgbm": "4.2.0",
+    "numpy": "1.26.3",
+    "pandas": "2.1.4",
+    "python": "3.11.13",
+    "scipy": "1.11.4"
+  },
+  "historical_input_hashes": {
+    "data/historical/hospitalization_calibration.csv": "8b16c184fcc3d83e222555c7bfd960dcdf4d36a949e3d050ddb46a9b7f3e661a",
+    "data/historical/hospitalization_proxy.csv": "c587f80d6678eed21227a7e72807bd8acf808152b81a1a51fee476f3952ae2f3",
+    "data/historical/ilinet_normalized.csv": "a46b43a1cc29c5a17d389ca2029459fbf0189928e1b074b11ae615cf4a15a3e6"
+  },
+  "models": [
+    "MIGHTE-Base",
+    "MIGHTE-Linear",
+    "MIGHTE-Nsemble"
+  ],
+  "notices": [
+    "ED visits: no 2026-09-26 value for Iowa (last reported 2026-06-27); forecast by MIGHTE-Base without wastewater and NSSP from the last reported value"
+  ],
+  "output_hashes": {
+    "model-output/MIGHTE-Base/2026-10-03-MIGHTE-Base.csv": "0f4601c5930a808ca17bd1db41b8d9a050b0e690202ea9c0bd3b8cfe7e7acdf0",
+    "model-output/MIGHTE-Linear/2026-10-03-MIGHTE-Linear.csv": "cd979ee66e08fe860ee84a7703d5040be14c973f0b084d845debbc0b7716e299",
+    "model-output/MIGHTE-Nsemble/2026-10-03-MIGHTE-Nsemble.csv": "1166ded0b84c6e596a556ea7028d4b316ff0c985fc9972f2264121f32715d44c"
+  },
+  "preview": true,
+  "quick": false,
+  "reference_date": "2026-10-03",
+  "run_id": "previews/2026-10-03/20260930T200838933452Z",
+  "settings": {
+    "component_workers": 2,
+    "ed_history": {
+      "mode": "ilinet_proxy"
+    },
+    "ed_target_transform": {
+      "boundary_epsilon": 5e-05,
+      "name": "logit"
+    },
+    "ordinal_plugin": "mighte.ordinal:predict",
+    "panel_ar_runtime": {
+      "anchor_step_weeks": 1,
+      "ar_weeks": [
+        1,
+        2,
+        3,
+        4,
+        8,
+        12,
+        26,
+        52
+      ],
+      "horizon_interaction_ridge": 0.02,
+      "joint_iterations": 5,
+      "location_intercept_ridge": 0.02,
+      "max_horizons": 4,
+      "mean_ridge": 0.01,
+      "min_train_rows": 1000,
+      "note": "Both panel AR models directly predict log1p(y[t+h])-log1p(y[t]) from features ending at t. The latest one-week difference is log1p(y[t])-log1p(y[t-1]), and integration begins from y[t] only.",
+      "partial_slope_ridge": 0.2,
+      "rolling_windows": [
+        2,
+        4,
+        8,
+        12
+      ],
+      "scale_max_iterations": 100,
+      "scale_ridge": 0.02
+    },
+    "runtime": {
+      "anchor_step_weeks": 1,
+      "bag_frac": 0.8,
+      "donor_lags": [
+        1,
+        2,
+        3,
+        4,
+        8,
+        12,
+        52
+      ],
+      "donor_min_overlap": 40,
+      "donor_top_k": 5,
+      "max_horizons": 4,
+      "min_train_rows": 1000,
+      "num_bags": 100,
+      "num_threads": 4,
+      "own_lags": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        8,
+        12,
+        26,
+        52
+      ],
+      "stage1_rounds": 250,
+      "stage2_rounds": 120
+    },
+    "season": "2026-2027",
+    "seed": 20360429,
+    "threads": 4
+  },
+  "settings_sha256": "cfb4f7d05aa364ae18324d9b95cb0ad87811de6dd1cb516a8963c9d4135ac464",
+  "snapshot_id": "20260930T200826628386Z",
+  "snapshot_manifest_sha256": "ed6a065dc62546b6c8f2389fb80c76a566087c1e927d3ffb418130cb0e557880",
+  "status": "complete",
+  "validation": {
+    "MIGHTE-Base": {
+      "locations": {
+        "wk flu hosp rate change": 53,
+        "wk inc flu hosp": 53,
+        "wk inc flu prop ed visits": 52
+      },
+      "rows": 10720,
+      "targets": [
+        "wk flu hosp rate change",
+        "wk inc flu hosp",
+        "wk inc flu prop ed visits"
+      ],
+      "valid": true
+    },
+    "MIGHTE-Linear": {
+      "locations": {
+        "wk inc flu hosp": 53
+      },
+      "rows": 4876,
+      "targets": [
+        "wk inc flu hosp"
+      ],
+      "valid": true
+    },
+    "MIGHTE-Nsemble": {
+      "locations": {
+        "wk inc flu hosp": 53
+      },
+      "rows": 4876,
+      "targets": [
+        "wk inc flu hosp"
+      ],
+      "valid": true
+    }
+  }
+}
