@@ -209,8 +209,8 @@ def archived_run(root, kind):
                  "preview": kind == "previews", "forecast_output_hashes": hashes}
 
 
-@pytest.mark.parametrize("kind,existing", [("official_submissions", False), ("previews", True)])
-def test_archive_adds_the_run_files_under_their_kind_and_date(tmp_path, monkeypatch, kind, existing):
+@pytest.mark.parametrize("kind", ["official_submissions", "previews"])
+def test_archive_commits_the_run_files_to_main_under_their_kind_and_date(tmp_path, monkeypatch, kind):
     run, metadata = archived_run(tmp_path, kind)
     api = "repos/owner/flusight_2026"
     blobs, calls = [], []
@@ -219,9 +219,9 @@ def test_archive_adds_the_run_files_under_their_kind_and_date(tmp_path, monkeypa
         endpoint = arguments[1]
         calls.append(endpoint)
         assert endpoint.startswith(api) and "pulls" not in endpoint
-        if endpoint == f"{api}/git/ref/heads/{publish.ARCHIVE}":
-            if not existing:
-                raise RuntimeError("gh: Not Found (HTTP 404)")
+        if endpoint == api:
+            return {"default_branch": "main"}
+        if endpoint == f"{api}/git/ref/heads/main":
             return {"object": {"sha": "previous-commit"}}
         if endpoint == f"{api}/git/commits/previous-commit":
             return {"tree": {"sha": "previous-tree"}}
@@ -229,29 +229,24 @@ def test_archive_adds_the_run_files_under_their_kind_and_date(tmp_path, monkeypa
             blobs.append(base64.b64decode(payload["content"]))
             return {"sha": f"blob-{len(blobs) - 1}"}
         if endpoint.endswith("/git/trees"):
-            assert payload.get("base_tree") == ("previous-tree" if existing else None)
+            assert payload["base_tree"] == "previous-tree"
             files = {entry["path"]: blobs[int(entry["sha"].removeprefix("blob-"))] for entry in payload["tree"]}
             expected = [*(run / name for name in metadata["forecast_output_hashes"]),
                         run / "manifest.json", run / "data-audit.json"]
-            assert files == {f"{kind}/2026-10-10/{path.name}": path.read_bytes() for path in expected}
+            assert files == {f"forecasts/{kind}/2026-10-10/{path.name}": path.read_bytes() for path in expected}
             return {"sha": "archive-tree"}
         if endpoint.endswith("/git/commits"):
-            assert payload["tree"] == "archive-tree"
-            assert payload["parents"] == (["previous-commit"] if existing else [])
+            assert payload["tree"] == "archive-tree" and payload["parents"] == ["previous-commit"]
             return {"sha": "archive-commit"}
-        if "/git/refs" in endpoint:
-            assert payload["sha"] == "archive-commit"
-            if existing:
-                assert payload["force"] is False
-            else:
-                assert payload["ref"] == f"refs/heads/{publish.ARCHIVE}"
+        if endpoint == f"{api}/git/refs/heads/main":
+            assert payload == {"sha": "archive-commit", "force": False}
             return None
         pytest.fail(f"Unexpected endpoint: {endpoint}")
 
     monkeypatch.setattr(publish, "gh_json", github)
     url = publish.archive_run(tmp_path, "owner/flusight_2026", metadata)
-    assert url == f"https://github.com/owner/flusight_2026/tree/{publish.ARCHIVE}/{kind}/2026-10-10"
-    assert "/git/refs" in calls[-1]
+    assert url == f"https://github.com/owner/flusight_2026/tree/main/forecasts/{kind}/2026-10-10"
+    assert calls[-1] == f"{api}/git/refs/heads/main"
 
 
 def test_republishing_identical_files_adds_no_archive_commit(tmp_path, monkeypatch):
@@ -259,6 +254,8 @@ def test_republishing_identical_files_adds_no_archive_commit(tmp_path, monkeypat
 
     def github(arguments, payload=None):
         endpoint = arguments[1]
+        if endpoint == "repos/owner/flusight_2026":
+            return {"default_branch": "main"}
         if "/git/ref/heads/" in endpoint:
             return {"object": {"sha": "previous-commit"}}
         if endpoint.endswith("/git/commits/previous-commit"):

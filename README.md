@@ -30,7 +30,7 @@ To reopen the latest report:
 ./mighte review --preview
 ```
 
-Data snapshots, forecasts, and reports are saved locally under `data/snapshots/`, `runs/` (`previews/` and `official_submissions/`), and `reports/`; `./mighte publish` also puts a reviewed run's forecast files on GitHub ([docs/PUBLISHING.md](docs/PUBLISHING.md)). Rerunning a preview or forecast for the same reference date replaces the earlier run and its report once the new run completes; a submitted run is kept as the record of what the hub received.
+Data snapshots, forecasts, and reports are saved locally under `data/snapshots/`, `runs/` (`previews/` and `official_submissions/`), and `reports/`; `./mighte publish` also commits a reviewed run's forecast files to `forecasts/` on `main` ([docs/PUBLISHING.md](docs/PUBLISHING.md)). Rerunning a preview or forecast for the same reference date replaces the earlier run and its report once the new run completes; a submitted run is kept as the record of what the hub received.
 
 ### Windows
 
