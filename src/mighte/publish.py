@@ -1,4 +1,5 @@
-"""Publish an existing reviewed dashboard to this pipeline repository's Pages site."""
+"""Publish an existing reviewed dashboard to this pipeline repository's Pages site, and archive
+the run's forecast files in the same repository."""
 from __future__ import annotations
 
 import base64
@@ -13,6 +14,7 @@ from .submit import gh_json
 from .util import digest, utc_now, write_json
 
 BRANCH = "codex/dashboard"
+ARCHIVE = "codex/forecasts"
 SITE_FILES = {"index.html", "publication.json", ".nojekyll"}
 GENERATOR = "mighte-pages-v1"
 
@@ -100,3 +102,40 @@ def publish_report(root: Path, repo: str, html: bytes, metadata: dict) -> dict:
                "url": pages["html_url"], "workflow_url": f"https://github.com/{repo}/actions/workflows/pages.yml"}
     write_json(root / ".runtime/pages-publication.json", receipt)
     return receipt
+
+
+def archive_run(root: Path, repo: str, metadata: dict) -> str:
+    """Copy the published run's forecast files, manifest and data audit to the archive branch, under
+    previews/ or official_submissions/ and the reference date. Republishing a date replaces its
+    files; earlier versions stay in the branch history."""
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or repo.lower().endswith("/flusight-forecast-hub"):
+        raise ValueError("Invalid pipeline repository for the forecast archive")
+    run = root / "runs" / metadata["run_id"]
+    for name, expected in metadata["forecast_output_hashes"].items():
+        if digest(run / name) != expected:
+            raise ValueError(f"{name} changed after review; rebuild and review it again")
+    folder = f"{'previews' if metadata['preview'] else 'official_submissions'}/{metadata['reference_date']}"
+    files = {f"{folder}/{Path(name).name}": run / name
+             for name in [*metadata["forecast_output_hashes"], "manifest.json", "data-audit.json"]}
+    api = f"repos/{repo}"
+    try:
+        head = gh_json(["api", f"{api}/git/ref/heads/{ARCHIVE}"])["object"]["sha"]
+    except RuntimeError as exc:
+        if "HTTP 404" not in str(exc):
+            raise
+        head = None
+    base = gh_json(["api", f"{api}/git/commits/{head}"])["tree"]["sha"] if head else None
+    entries = [{"path": name, "mode": "100644", "type": "blob",
+                "sha": gh_json(["api", f"{api}/git/blobs", "--method", "POST"],
+                               {"content": base64.b64encode(path.read_bytes()).decode(), "encoding": "base64"})["sha"]}
+               for name, path in sorted(files.items())]
+    tree = gh_json(["api", f"{api}/git/trees", "--method", "POST"],
+                   {"tree": entries, **({"base_tree": base} if base else {})})["sha"]
+    if tree != base:  # Republishing identical files adds no commit.
+        commit = gh_json(["api", f"{api}/git/commits", "--method", "POST"],
+                         {"message": f"Archive {folder}", "tree": tree, "parents": [head] if head else []})["sha"]
+        if head:
+            gh_json(["api", f"{api}/git/refs/heads/{ARCHIVE}", "--method", "PATCH"], {"sha": commit, "force": False})
+        else:
+            gh_json(["api", f"{api}/git/refs", "--method", "POST"], {"ref": f"refs/heads/{ARCHIVE}", "sha": commit})
+    return f"https://github.com/{repo}/tree/{ARCHIVE}/{folder}"

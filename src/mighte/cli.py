@@ -11,7 +11,7 @@ import requests
 from .contract import MODELS, Contract, reference_saturday
 from .data import refresh, latest_snapshot
 from .pipeline import latest_run, print_notices, run_forecasts, verify_run
-from .publish import prepare_publication, publish_report, repository
+from .publish import archive_run, prepare_publication, publish_report, repository
 from .report import build_report
 from .submit import REGISTRATION_MODELS, register, submit
 from .util import project_root
@@ -44,7 +44,7 @@ def main():
         if command == "submit":
             p.add_argument("--yes", action="store_true", help="Confirm that these exact files were reviewed")
         if command == "publish":
-            p.add_argument("--yes", action="store_true", help="Confirm publishing this reviewed dashboard to GitHub Pages")
+            p.add_argument("--yes", action="store_true", help="Confirm publishing this reviewed dashboard and its forecast files to GitHub")
     p = sub.add_parser("register", help="Review and confirm the metadata-only registration/update PR")
     p.add_argument("--yes", action="store_true", help="Confirm that the metadata and PR text were reviewed")
     sub.add_parser("check", help="Check local metadata, environment and fixed model settings")
@@ -90,13 +90,14 @@ def main():
             run = args.run or latest_run(root, preview=args.preview)
             html, metadata = prepare_publication(root, run, preview=args.preview)
             repo = repository(root)
-            print(f"Publish the reviewed {'PREVIEW' if metadata['preview'] else 'forecast'} dashboard for "
-                  f"{metadata['reference_date']} to {repo}?\nRun: {run}")
+            print(f"Publish the reviewed {'PREVIEW' if metadata['preview'] else 'forecast'} dashboard and forecast "
+                  f"files for {metadata['reference_date']} to {repo}?\nRun: {run}")
             if not args.yes and input("Type publish to update the public dashboard: ").strip() != "publish":
                 print("Publication cancelled.")
                 return
             receipt = publish_report(root, repo, html, metadata)
             print(f"Publication requested: {receipt['url']}\nDeployment status: {receipt['workflow_url']}")
+            print(f"Forecast files: {archive_run(root, repo, metadata)}")
             return
         else:
             run = args.run or latest_run(root)

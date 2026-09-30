@@ -102,7 +102,7 @@ def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=Fal
             reference = latest_released_reference(snapshot)
             check_reference_date(reference)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        run = root / "runs" / ("previews" if preview else "prospective") / reference / stamp
+        run = root / "runs" / ("previews" if preview else "official_submissions") / reference / stamp
         run.mkdir(parents=True)
         effective = json.loads(json.dumps(settings))
         effective["runtime"]["num_threads"] = settings["threads"]

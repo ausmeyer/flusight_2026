@@ -57,9 +57,9 @@ def discover_benchmarks(root: Path, reference_dates, *, season: str, online=True
     return {**catalog, "files": [f for f in catalog["files"] if f["reference_date"] in dates]}, status
 
 
-def prospective_runs(root: Path) -> list[Path]:
+def official_runs(root: Path) -> list[Path]:
     selected = {}
-    for path in sorted((root / "runs/prospective").glob("*/*/manifest.json")):
+    for path in sorted((root / "runs/official_submissions").glob("*/*/manifest.json")):
         manifest = json.loads(path.read_text())
         if manifest.get("preview", True) or manifest.get("status") != "complete":
             continue
@@ -80,7 +80,7 @@ def prospective_runs(root: Path) -> list[Path]:
 
 def load_archive(root: Path) -> pd.DataFrame:
     frames = []
-    for run in prospective_runs(root):
+    for run in official_runs(root):
         manifest = verify_run(root, run)
         for filename in manifest["output_hashes"]:
             path = run / filename

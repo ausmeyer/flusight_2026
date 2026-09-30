@@ -8,7 +8,7 @@ import pytest
 
 from mighte.contract import ED, HOSP, TREND, UNIT, read_forecast
 from mighte.data import NSSP, WW
-from mighte.evaluate import load_archive, prospective_runs
+from mighte.evaluate import load_archive, official_runs
 from mighte.pipeline import run_forecasts, verify_run
 from mighte.report import build_report
 from mighte.submit import create_pr
@@ -212,15 +212,15 @@ def test_run_without_any_producible_forecast_fails_loudly(root, tmp_path):
 
 
 def test_select_submitted_run_without_double_counting(tmp_path):
-    base = tmp_path / "runs/prospective/2026-10-10"
+    base = tmp_path / "runs/official_submissions/2026-10-10"
     for name, completed in [("first", "2026-10-07T15:00:00-04:00"),
                              ("later", "2026-10-07T16:00:00-04:00"),
                              ("late", "2026-10-08T10:00:00-04:00")]:
         write_json(base / name / "manifest.json", {"preview": False, "status": "complete",
                      "reference_date": "2026-10-10", "created_at": completed, "completed_at": completed})
-    assert prospective_runs(tmp_path) == [base / "later"]
+    assert official_runs(tmp_path) == [base / "later"]
     write_json(base / "first/submission.json", {"url": "test", "submitted_at": "2026-10-07T15:30:00-04:00"})
-    assert prospective_runs(tmp_path) == [base / "first"]
+    assert official_runs(tmp_path) == [base / "first"]
 
 
 def test_submission_upload_allowlist_rejects_other_files(tmp_path):

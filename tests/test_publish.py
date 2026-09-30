@@ -13,8 +13,8 @@ from mighte.util import digest, write_json
 
 @pytest.fixture
 def reviewed(tmp_path, monkeypatch):
-    run = tmp_path / "runs/prospective/2026-10-10/fixture"
-    manifest = {"run_id": "prospective/2026-10-10/fixture", "reference_date": "2026-10-10",
+    run = tmp_path / "runs/official_submissions/2026-10-10/fixture"
+    manifest = {"run_id": "official_submissions/2026-10-10/fixture", "reference_date": "2026-10-10",
                 "preview": False, "quick": False, "settings": {"runtime": {"num_bags": 100}},
                 "output_hashes": {"model-output/example.csv": "forecast-hash"}}
     write_json(run / "manifest.json", manifest)
@@ -173,9 +173,114 @@ def test_publish_cancellation_has_no_external_effect(root, monkeypatch, capsys):
     monkeypatch.setattr(cli, "repository", lambda *a: "owner/flusight_2026")
     monkeypatch.setattr("builtins.input", lambda prompt: "cancel")
     monkeypatch.setattr(cli, "publish_report", lambda *a: pytest.fail("Publication was cancelled"))
+    monkeypatch.setattr(cli, "archive_run", lambda *a: pytest.fail("Publication was cancelled"))
     monkeypatch.setattr(cli, "submit", lambda *a: pytest.fail("Never submit when publishing"))
     cli.main()
     assert "Publication cancelled" in capsys.readouterr().out
+
+
+def test_confirmed_publication_also_archives_the_forecast_files(root, monkeypatch, capsys):
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(sys, "argv", ["mighte", "publish", "--preview"])
+    monkeypatch.setattr(cli, "latest_run", lambda *a, **k: root / "runs/example")
+    metadata = {"reference_date": "2026-09-26", "preview": True}
+    monkeypatch.setattr(cli, "prepare_publication", lambda *a, **k: (b"report", metadata))
+    monkeypatch.setattr(cli, "repository", lambda *a: "owner/flusight_2026")
+    monkeypatch.setattr("builtins.input", lambda prompt: "publish")
+    calls = []
+    monkeypatch.setattr(cli, "publish_report", lambda *a: calls.append("dashboard") or {"url": "site", "workflow_url": "status"})
+    monkeypatch.setattr(cli, "archive_run", lambda _, repo, data: calls.append((repo, data)) or "archive-url")
+    cli.main()
+    assert calls == ["dashboard", ("owner/flusight_2026", metadata)]
+    assert "Forecast files: archive-url" in capsys.readouterr().out
+
+
+def archived_run(root, kind):
+    run = root / "runs" / kind / "2026-10-10/fixture"
+    hashes = {}
+    for model in ["MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble"]:
+        path = run / f"model-output/{model}/2026-10-10-{model}.csv"
+        path.parent.mkdir(parents=True)
+        path.write_text(f"{model} forecast\n")
+        hashes[str(path.relative_to(run))] = digest(path)
+    write_json(run / "manifest.json", {"run_id": f"{kind}/2026-10-10/fixture"})
+    write_json(run / "data-audit.json", {"notices": []})
+    return run, {"run_id": f"{kind}/2026-10-10/fixture", "reference_date": "2026-10-10",
+                 "preview": kind == "previews", "forecast_output_hashes": hashes}
+
+
+@pytest.mark.parametrize("kind,existing", [("official_submissions", False), ("previews", True)])
+def test_archive_adds_the_run_files_under_their_kind_and_date(tmp_path, monkeypatch, kind, existing):
+    run, metadata = archived_run(tmp_path, kind)
+    api = "repos/owner/flusight_2026"
+    blobs, calls = [], []
+
+    def github(arguments, payload=None):
+        endpoint = arguments[1]
+        calls.append(endpoint)
+        assert endpoint.startswith(api) and "pulls" not in endpoint
+        if endpoint == f"{api}/git/ref/heads/{publish.ARCHIVE}":
+            if not existing:
+                raise RuntimeError("gh: Not Found (HTTP 404)")
+            return {"object": {"sha": "previous-commit"}}
+        if endpoint == f"{api}/git/commits/previous-commit":
+            return {"tree": {"sha": "previous-tree"}}
+        if endpoint.endswith("/git/blobs"):
+            blobs.append(base64.b64decode(payload["content"]))
+            return {"sha": f"blob-{len(blobs) - 1}"}
+        if endpoint.endswith("/git/trees"):
+            assert payload.get("base_tree") == ("previous-tree" if existing else None)
+            files = {entry["path"]: blobs[int(entry["sha"].removeprefix("blob-"))] for entry in payload["tree"]}
+            expected = [*(run / name for name in metadata["forecast_output_hashes"]),
+                        run / "manifest.json", run / "data-audit.json"]
+            assert files == {f"{kind}/2026-10-10/{path.name}": path.read_bytes() for path in expected}
+            return {"sha": "archive-tree"}
+        if endpoint.endswith("/git/commits"):
+            assert payload["tree"] == "archive-tree"
+            assert payload["parents"] == (["previous-commit"] if existing else [])
+            return {"sha": "archive-commit"}
+        if "/git/refs" in endpoint:
+            assert payload["sha"] == "archive-commit"
+            if existing:
+                assert payload["force"] is False
+            else:
+                assert payload["ref"] == f"refs/heads/{publish.ARCHIVE}"
+            return None
+        pytest.fail(f"Unexpected endpoint: {endpoint}")
+
+    monkeypatch.setattr(publish, "gh_json", github)
+    url = publish.archive_run(tmp_path, "owner/flusight_2026", metadata)
+    assert url == f"https://github.com/owner/flusight_2026/tree/{publish.ARCHIVE}/{kind}/2026-10-10"
+    assert "/git/refs" in calls[-1]
+
+
+def test_republishing_identical_files_adds_no_archive_commit(tmp_path, monkeypatch):
+    _, metadata = archived_run(tmp_path, "official_submissions")
+
+    def github(arguments, payload=None):
+        endpoint = arguments[1]
+        if "/git/ref/heads/" in endpoint:
+            return {"object": {"sha": "previous-commit"}}
+        if endpoint.endswith("/git/commits/previous-commit"):
+            return {"tree": {"sha": "same-tree"}}
+        if endpoint.endswith("/git/blobs"):
+            return {"sha": "blob"}
+        if endpoint.endswith("/git/trees"):
+            return {"sha": "same-tree"}
+        pytest.fail(f"No commit or branch update expected: {endpoint}")
+
+    monkeypatch.setattr(publish, "gh_json", github)
+    publish.archive_run(tmp_path, "owner/flusight_2026", metadata)
+
+
+def test_archive_refuses_changed_forecasts_and_the_hub_before_any_request(tmp_path, monkeypatch):
+    run, metadata = archived_run(tmp_path, "official_submissions")
+    monkeypatch.setattr(publish, "gh_json", lambda *a, **k: pytest.fail("No network request allowed"))
+    with pytest.raises(ValueError, match="Invalid pipeline repository"):
+        publish.archive_run(tmp_path, "cdcepi/FluSight-forecast-hub", metadata)
+    (run / next(iter(metadata["forecast_output_hashes"]))).write_text("edited\n")
+    with pytest.raises(ValueError, match="changed after review"):
+        publish.archive_run(tmp_path, "owner/flusight_2026", metadata)
 
 
 def test_deployment_is_explicit_and_checks_artifact_hash(root, tmp_path):
