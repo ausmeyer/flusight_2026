@@ -102,7 +102,7 @@ TEMPLATE = r'''<!doctype html>
 <style>
 :root{font-family:system-ui,-apple-system,sans-serif;color:#1b3040;background:#f2f5f6}
 body{margin:0}main{max-width:1450px;margin:auto;padding:28px 32px 50px}h1{font-size:30px;letter-spacing:-1px;margin:4px 0}
-.eyebrow{color:#367b80;font-size:12px;font-weight:750;letter-spacing:2px}.muted{color:#5b6f7c;font-size:13px;line-height:1.65}
+.eyebrow{color:#367b80;font-size:12px;font-weight:750;letter-spacing:2px}
 .head{display:flex;justify-content:space-between;gap:18px;align-items:center}
 .notices{margin-top:16px;border:1px solid #e3c98f;background:#fff8e8;border-radius:10px;padding:12px 16px;font-size:13px;color:#5a4712}.notices ul{margin:6px 0 0;padding-left:18px}.notices[hidden]{display:none}
 .card{margin-top:22px;border:1px solid #dce4e8;border-radius:13px;background:white;padding:22px;box-shadow:0 2px 3px #19333e04}
@@ -121,7 +121,7 @@ background:white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 #chart .hoverlayer .legendlines{display:none}
 th{text-align:right;padding:11px 10px;background:#f0f5f7;color:#46606e;font-size:11px}td{text-align:right;padding:12px 10px;border-top:1px solid #e4ecef}th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:white}
 .positive{color:#157267}.negative{color:#a24141}.empty{padding:30px;text-align:center;color:#6f808a}
-details{margin-top:14px;font-size:13px}summary{cursor:pointer;color:#396575}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f7f8;padding:16px;max-height:400px;overflow:auto;font-size:11px}
+details{margin-top:14px;font-size:13px}summary{cursor:pointer;color:#396575}
 details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;right:auto}}
 @media(max-width:720px){main{padding:18px 12px}.card{padding:13px}.head{display:block}#chart{height:350px}.timeline{gap:12px}.timeline select{min-width:125px}}
 </style></head><body><main>
@@ -145,10 +145,6 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 <label>Scoring locations<select id="scope"><option value="states">States + DC</option><option value="states_pr">States + DC + Puerto Rico</option><option value="US">United States</option><option value="all">All (includes national)</option><option value="selected">Selected location above</option></select></label>
 <label>Horizon<select id="horizon"><option value="all">All horizons</option><option value="0">0 · nowcast</option><option value="1">1 week ahead</option><option value="2">2 weeks ahead</option><option value="3">3 weeks ahead</option></select></label>
 </div><div id="accuracy" class="tablewrap"></div>
-</section><section class="card"><h2>Run details</h2><div id="provenance" class="muted"></div>
-<details><summary>Input freshness, historical reconstruction, and omitted ED locations</summary><pre id="audit"></pre></details>
-<details><summary>Hub baseline and comparison-model availability</summary><pre id="benchmarks"></pre></details>
-<details><summary>Model settings and validation</summary><pre id="manifest"></pre></details>
 </section></main><script>
 const D=__DATA__;
 const el=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -170,15 +166,16 @@ function probabilityPlot(ref,loc,chosen){
 const rows=D.categorical_forecasts.filter(r=>r.reference_date===ref&&r.location===loc&&chosen.includes(r.model_id));
 const models=chosen.filter(m=>rows.some(r=>r.model_id===m)),n=Math.max(1,models.length),traces=[];
 const layout={margin:{t:45,b:45,l:125,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},annotations:[],showlegend:false};
+const height=Math.max(400,n*300),plotHeight=height-layout.margin.t-layout.margin.b,gap=72,panelHeight=(plotHeight-gap*(n-1))/n;
 models.forEach((model,i)=>{const values=rows.filter(r=>r.model_id===model).sort((a,b)=>a.horizon-b.horizon),suffix=i?String(i+1):'',c=colors[model];
-const domain=[(n-i-1)/n+.05/n,(n-i)/n-.1/n];
+const domain=[(n-i-1)*(panelHeight+gap)/plotHeight,1-i*(panelHeight+gap)/plotHeight];
 traces.push({type:'heatmap',x:values.map(r=>r.target_end_date),y:D.categories.map(c=>c.replaceAll('_',' ')),z:D.categories.map(c=>values.map(r=>r[c])),
 xaxis:'x'+suffix,yaxis:'y'+suffix,zmin:0,zmax:1,colorscale:[[0,'#f4f7f8'],[1,c]],showscale:false,xgap:4,ygap:4,texttemplate:'%{z:.1%}',textfont:{size:13},
 hovertemplate:`${esc(model.replace(/^MIGHTE-/,''))} · %{x}<br>%{y}: %{z:.1%}<extra></extra>`});
 layout['xaxis'+suffix]={type:'category',anchor:'y'+suffix,tickmode:'array',tickvals:values.map(r=>r.target_end_date),ticktext:values.map(r=>`${r.target_end_date}<br>Horizon ${r.horizon}`),showgrid:false};
 layout['yaxis'+suffix]={type:'category',domain,anchor:'x'+suffix,showgrid:false,ticks:''};});
 if(!models.length)layout.annotations.push({text:'No selected forecasts for this week and location.',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false});
-el('chart').style.height=Math.max(400,n*260)+'px';Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
+el('chart').style.height=height+'px';Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
 }
 function plot(){const ref=el('reference').value,target=el('target').value,loc=el('location').value,mult=target.includes('prop')?100:1;
 const index=references.indexOf(ref);el('week-slider').value=index;el('week-slider').setAttribute('aria-valuetext',ref);
@@ -243,8 +240,6 @@ const notices=(D.manifest.notices||[]).flatMap(n=>n.startsWith('ED visits: no ')
 Object.entries(D.data_audit['wk inc flu prop ed visits'].anchor_missing).map(([loc,day])=>
 `${D.locations.find(l=>l.location===loc).location_name} ED: using older data (last reported ${day}), without wastewater.`):[n]);
 if(notices.length){el('notices').querySelector('ul').innerHTML=notices.map(n=>'<li>'+esc(n)+'</li>').join('');el('notices').hidden=false}
-el('provenance').textContent=`Forecast inputs: ${D.manifest.snapshot_id}. Scoring truth: ${D.truth_snapshot}. Report: ${new Date(D.generated_at).toLocaleString()}. Run: ${D.manifest.run_id}.`;
-['audit','benchmarks','manifest'].forEach(id=>el(id).textContent=JSON.stringify(id==='audit'?D.data_audit:id==='benchmarks'?D.benchmarks:D.manifest,null,2));
 ['reference','target','location','history'].forEach(id=>el(id).addEventListener('change',plot));el('models').addEventListener('change',plot);
 function browseWeek(index){el('reference').value=references[Math.max(0,Math.min(references.length-1,index))];plot()}
 el('week-slider').addEventListener('input',()=>browseWeek(Number(el('week-slider').value)));
