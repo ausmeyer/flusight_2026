@@ -179,14 +179,8 @@ def submit(root: Path, run: Path) -> str:
         files[filename] = path
     reference = manifest["reference_date"]
     models = manifest.get("models", list(MODELS))
-    notices = manifest.get("notices", [])
     title = f"MIGHTE forecasts for {reference}"
-    body = (f"Prospective {reference} forecasts from {', '.join(models)}.\n\n"
-            "MIGHTE-Base combines its targets in one file; the other models provide hospitalization forecasts. "
-            "No peak timing or peak height targets are included.\n\n"
-            + ("This week:\n" + "".join(f"- {notice}\n" for notice in notices) + "\n" if notices else "")
-            + "All files passed local validation against the current hub configuration. "
-            f"Inputs were frozen in snapshot `{manifest['snapshot_id']}` and reviewed locally before submission.")
+    body = f"{reference} forecasts from {', '.join(models)}."
     url = create_pr(root, files, branch=f"codex/mighte-{reference}", title=title, body=body, reference=reference)
     write_json(run / "submission.json", {"url": url, "submitted_at": utc_now(), "output_hashes": manifest["output_hashes"]})
     return url
