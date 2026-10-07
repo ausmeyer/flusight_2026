@@ -3961,7 +3961,7 @@ hovertemplate:`${esc(model.replace(/^MIGHTE-/,''))} · %{x}<br>%{y}: %{z:.1%}<ex
 layout['xaxis'+suffix]={type:'category',anchor:'y'+suffix,tickmode:'array',tickvals:values.map(r=>r.target_end_date),ticktext:values.map(r=>`${r.target_end_date}<br>Horizon ${r.horizon}`),showgrid:false};
 layout['yaxis'+suffix]={type:'category',domain,anchor:'x'+suffix,showgrid:false,ticks:''};});
 if(!models.length)layout.annotations.push({text:'No selected forecasts for this week and location.',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false});
-el('chart').style.height=Math.max(400,n*260)+'px';Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false});
+el('chart').style.height=Math.max(400,n*260)+'px';Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
 }
 function plot(){const ref=el('reference').value,target=el('target').value,loc=el('location').value,mult=target.includes('prop')?100:1;
 const index=references.indexOf(ref);el('week-slider').value=index;el('week-slider').setAttribute('aria-valuetext',ref);
@@ -3997,7 +3997,7 @@ rows.forEach(r=>note(r.target_end_date,c,esc(model.replace(/^MIGHTE-/,'')),r.med
 traces.push({x,y:rows.map(r=>r.median*mult),mode:'lines+markers',name:model,legendgroup:model,line:{color:c,width:2.5},marker:{size:8},hoverinfo:'skip'})});
 const weeks=Object.keys(hover).sort();
 traces.push({x:weeks,y:weeks.map(()=>0),text:weeks.map(d=>hover[d].join('<br>')),mode:'markers',marker:{opacity:0},showlegend:false,hovertemplate:'%{text}<extra></extra>'});
-Plotly.react('chart',traces,{hoverdistance:-1,margin:{t:25,b:45,l:65,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},uirevision:[target,loc,history,...chosen].join('|'),xaxis:{type:'date',range:[begin,end],gridcolor:'#edf1f3',hoverformat:'%b %-d, %Y'},yaxis:{title:{text:mult===100?'Influenza ED visits (%)':'Hospital admissions'},range:[0,ymax*1.08],gridcolor:'#edf1f3'},legend:{orientation:'h',y:1.14,maxheight:.25},hovermode:'x unified',shapes:[{type:'line',x0:ref,x1:ref,y0:0,y1:1,yref:'paper',line:{color:'#95a7ae',dash:'dot',width:1}}]},{responsive:true,displaylogo:false});
+Plotly.react('chart',traces,{hoverdistance:-1,margin:{t:25,b:45,l:65,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},uirevision:[target,loc,history,...chosen].join('|'),xaxis:{type:'date',range:[begin,end],gridcolor:'#edf1f3',hoverformat:'%b %-d, %Y'},yaxis:{title:{text:mult===100?'Influenza ED visits (%)':'Hospital admissions'},range:[0,ymax*1.08],gridcolor:'#edf1f3'},legend:{orientation:'h',y:1.14,maxheight:.25},hovermode:'x unified',shapes:[{type:'line',x0:ref,x1:ref,y0:0,y1:1,yref:'paper',line:{color:'#95a7ae',dash:'dot',width:1}}]},{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
 table();}
 const mean=rows=>rows.length?rows.reduce((a,b)=>a+b,0)/rows.length:null;
 const geom=arr=>arr.length?(arr.includes(0)?0:Math.exp(mean(arr.map(Math.log)))):null;
