@@ -398,9 +398,13 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
             raise ValueError(f"{LABELS[target]}: data for the week ending {anchor.date()} are not released yet "
                              f"(latest reported week {max(missing.values())}); rerun after the Wednesday release")
         if missing:
-            which = ", ".join(f"{names[x]} (last reported {day})" for x, day in missing.items())
-            notices.append(f"{LABELS[target]}: no {anchor.date()} value for {which}; forecast by MIGHTE-Base "
-                           "without wastewater and NSSP from the last reported value")
+            if target == ED:
+                notices.extend(f"{names[x]} ED: using older data (last reported {day}), without wastewater."
+                               for x, day in missing.items())
+            else:
+                which = ", ".join(f"{names[x]} (last reported {day})" for x, day in missing.items())
+                notices.append(f"{LABELS[target]}: no {anchor.date()} value for {which}; forecast by MIGHTE-Base "
+                               "without wastewater and NSSP from the last reported value")
         model = observed[["location_name", "date", "value"]].rename(columns={"value": "total_hosp"})
         if target == HOSP:
             model, n_filled, levels = hospitalization_history(root, model, anchor)
