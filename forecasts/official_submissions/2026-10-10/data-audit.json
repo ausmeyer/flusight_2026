@@ -1,0 +1,760 @@
+{
+  "covariates": {
+    "nssp": {
+      "available": true,
+      "expected_week": "2026-10-03",
+      "week_used": "2026-10-03"
+    },
+    "ww": {
+      "available": true,
+      "expected_week": "2026-09-26",
+      "week_used": "2026-09-26"
+    }
+  },
+  "ed_reconstruction": {
+    "coefficients": [
+      -6.172244381300727,
+      1.5747777031245962
+    ],
+    "mapping_locations": 52,
+    "mapping_rows": 9469,
+    "mode": "ilinet_proxy",
+    "proxy_rows": 24391,
+    "response_transform": {
+      "boundary_epsilon": 5e-05,
+      "name": "logit"
+    },
+    "shift_days": 728,
+    "source_end": "2019-06-30",
+    "values": "quantile-mapped to each location's observed NSSP distribution"
+  },
+  "ed_target_transform": {
+    "boundary_anchor_observations": 0,
+    "boundary_epsilon": 5e-05,
+    "boundary_policy": "Clip response-link inputs only; do not alter truth or predictor history",
+    "boundary_training_observations": 199,
+    "name": "logit"
+  },
+  "hospitalization_levels": [
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Alabama",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Alaska",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.3343,
+      "location_name": "Arizona",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.1986,
+      "location_name": "Arkansas",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "California",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.999,
+      "location_name": "Colorado",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.9773,
+      "location_name": "Connecticut",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Delaware",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "District of Columbia",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Florida",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.7855,
+      "location_name": "Georgia",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Hawaii",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 0.9846,
+      "location_name": "Idaho",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Illinois",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.4942,
+      "location_name": "Indiana",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.7855,
+      "location_name": "Iowa",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.6571,
+      "location_name": "Kansas",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Kentucky",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.343,
+      "location_name": "Louisiana",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.5628,
+      "location_name": "Maine",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.8765,
+      "location_name": "Maryland",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.2508,
+      "location_name": "Massachusetts",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 0.9719,
+      "location_name": "Michigan",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.9871,
+      "location_name": "Minnesota",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Mississippi",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.531,
+      "location_name": "Missouri",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Montana",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Nebraska",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 0.8381,
+      "location_name": "Nevada",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.591,
+      "location_name": "New Hampshire",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.8062,
+      "location_name": "New Jersey",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.6333,
+      "location_name": "New Mexico",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.4345,
+      "location_name": "New York",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "North Carolina",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "North Dakota",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Ohio",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Oklahoma",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.3699,
+      "location_name": "Oregon",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Pennsylvania",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Puerto Rico",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Rhode Island",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "South Carolina",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "South Dakota",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Tennessee",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.6937,
+      "location_name": "Texas",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.8246,
+      "location_name": "US",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Utah",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 0.949,
+      "location_name": "Vermont",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.9007,
+      "location_name": "Virginia",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.4388,
+      "location_name": "Washington",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 1.8214,
+      "location_name": "West Virginia",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Wisconsin",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    },
+    {
+      "current_in_season_weeks": 51,
+      "legacy": 2.0,
+      "location_name": "Wyoming",
+      "mandatory_in_season_weeks": 65,
+      "voluntary": 2.0
+    }
+  ],
+  "notices": [
+    "ED visits: no 2026-10-03 value for Iowa (last reported 2026-06-27); forecast by MIGHTE-Base without wastewater and NSSP from the last reported value"
+  ],
+  "ordinal": {
+    "aggregation": "arithmetic mean of bag probabilities",
+    "anchor_date": "2026-10-03",
+    "bags": 100,
+    "baseline_reference_offset_days": -7,
+    "boosting_rounds": 250,
+    "component": "MIGHTE-Base-Ordinal",
+    "features": [
+      "y_lag_1",
+      "y_lag_2",
+      "y_lag_3",
+      "y_lag_4",
+      "y_lag_5",
+      "y_lag_6",
+      "y_lag_8",
+      "y_lag_12",
+      "y_lag_26",
+      "y_lag_52",
+      "y_diff_1",
+      "y_diff_4",
+      "y_pct_change_1",
+      "y_pct_change_4",
+      "y_roll_mean_2",
+      "y_roll_std_2",
+      "y_roll_mean_4",
+      "y_roll_std_4",
+      "y_roll_mean_8",
+      "y_roll_std_8",
+      "y_roll_mean_12",
+      "y_roll_std_12",
+      "week_sin",
+      "week_cos",
+      "quarter_sin",
+      "quarter_cos",
+      "is_flu_season",
+      "is_peak_flu",
+      "regime_pre_2022",
+      "regime_2022_2024",
+      "regime_post_2024",
+      "regime_post_2024_x_flu",
+      "us_lag_1",
+      "nat_mean_lag_1",
+      "us_lag_2",
+      "nat_mean_lag_2",
+      "us_lag_3",
+      "nat_mean_lag_3",
+      "us_lag_4",
+      "nat_mean_lag_4",
+      "us_lag_5",
+      "nat_mean_lag_5",
+      "us_lag_6",
+      "nat_mean_lag_6",
+      "us_lag_8",
+      "nat_mean_lag_8",
+      "us_lag_12",
+      "nat_mean_lag_12",
+      "us_lag_26",
+      "nat_mean_lag_26",
+      "us_lag_52",
+      "nat_mean_lag_52",
+      "nat_std_lag_1",
+      "nat_mean_diff_1",
+      "nat_mean_diff_4",
+      "loc_Alabama",
+      "loc_Alaska",
+      "loc_Arizona",
+      "loc_Arkansas",
+      "loc_California",
+      "loc_Colorado",
+      "loc_Connecticut",
+      "loc_Delaware",
+      "loc_District of Columbia",
+      "loc_Florida",
+      "loc_Georgia",
+      "loc_Hawaii",
+      "loc_Idaho",
+      "loc_Illinois",
+      "loc_Indiana",
+      "loc_Iowa",
+      "loc_Kansas",
+      "loc_Kentucky",
+      "loc_Louisiana",
+      "loc_Maine",
+      "loc_Maryland",
+      "loc_Massachusetts",
+      "loc_Michigan",
+      "loc_Minnesota",
+      "loc_Mississippi",
+      "loc_Missouri",
+      "loc_Montana",
+      "loc_Nebraska",
+      "loc_Nevada",
+      "loc_New Hampshire",
+      "loc_New Jersey",
+      "loc_New Mexico",
+      "loc_New York",
+      "loc_North Carolina",
+      "loc_North Dakota",
+      "loc_Ohio",
+      "loc_Oklahoma",
+      "loc_Oregon",
+      "loc_Pennsylvania",
+      "loc_Puerto Rico",
+      "loc_Rhode Island",
+      "loc_South Carolina",
+      "loc_South Dakota",
+      "loc_Tennessee",
+      "loc_Texas",
+      "loc_US",
+      "loc_Utah",
+      "loc_Vermont",
+      "loc_Virginia",
+      "loc_Washington",
+      "loc_West Virginia",
+      "loc_Wisconsin",
+      "loc_Wyoming",
+      "wastewaterscan_flu_a_log10_pmmov",
+      "wastewaterscan_flu_a_log10_pmmov_lag1",
+      "wastewaterscan_flu_a_log10_pmmov_lag2",
+      "wastewaterscan_flu_a_log10_pmmov_lag4",
+      "wastewaterscan_flu_a_log10_pmmov_available",
+      "wastewaterscan_flu_a_log10_pmmov_age_weeks",
+      "wastewaterscan_flu_a_log10_pmmov_lag1_available",
+      "wastewaterscan_flu_a_log10_pmmov_lag1_age_weeks",
+      "wastewaterscan_flu_a_log10_pmmov_lag2_available",
+      "wastewaterscan_flu_a_log10_pmmov_lag2_age_weeks",
+      "wastewaterscan_flu_a_log10_pmmov_lag4_available",
+      "wastewaterscan_flu_a_log10_pmmov_lag4_age_weeks",
+      "nssp_influenza_pct_ed_visits",
+      "nssp_influenza_pct_ed_visits_available",
+      "nssp_influenza_pct_ed_visits_age_weeks",
+      "nssp_influenza_pct_ed_visits_model_lag1",
+      "nssp_influenza_pct_ed_visits_model_lag2",
+      "nssp_influenza_pct_ed_visits_model_lag4",
+      "horizon_weeks",
+      "horizon_sin",
+      "horizon_cos"
+    ],
+    "large_rates_per_100k": [
+      1.7,
+      3.0,
+      4.0,
+      5.0
+    ],
+    "objective": "multiclass",
+    "population_by_location": {
+      "Alabama": 5157699,
+      "Alaska": 740133,
+      "Arizona": 7582384,
+      "Arkansas": 3088354,
+      "California": 39431263,
+      "Colorado": 5957493,
+      "Connecticut": 3675069,
+      "Delaware": 1051917,
+      "District of Columbia": 702250,
+      "Florida": 23372215,
+      "Georgia": 11180878,
+      "Hawaii": 1446146,
+      "Idaho": 2001619,
+      "Illinois": 12710158,
+      "Indiana": 6924275,
+      "Iowa": 3241488,
+      "Kansas": 2970606,
+      "Kentucky": 4588372,
+      "Louisiana": 4597740,
+      "Maine": 1405012,
+      "Maryland": 6263220,
+      "Massachusetts": 7136171,
+      "Michigan": 10140459,
+      "Minnesota": 5793151,
+      "Mississippi": 2943045,
+      "Missouri": 6245466,
+      "Montana": 1137233,
+      "Nebraska": 2005465,
+      "Nevada": 3267467,
+      "New Hampshire": 1409032,
+      "New Jersey": 9500851,
+      "New Mexico": 2130256,
+      "New York": 19867248,
+      "North Carolina": 11046024,
+      "North Dakota": 796568,
+      "Ohio": 11883304,
+      "Oklahoma": 4095393,
+      "Oregon": 4272371,
+      "Pennsylvania": 13078751,
+      "Puerto Rico": 3203295,
+      "Rhode Island": 1112308,
+      "South Carolina": 5478831,
+      "South Dakota": 924669,
+      "Tennessee": 7227750,
+      "Texas": 31290831,
+      "US": 340110988,
+      "Utah": 3503613,
+      "Vermont": 648493,
+      "Virginia": 8811195,
+      "Washington": 7958180,
+      "West Virginia": 1769979,
+      "Wisconsin": 5960975,
+      "Wyoming": 587618
+    },
+    "seed": 20360429,
+    "stable_count_threshold": 10,
+    "stable_rates_per_100k": [
+      0.3,
+      0.5,
+      0.7,
+      1.0
+    ],
+    "test_rows": 212,
+    "training_class_counts": {
+      "decrease": 18047,
+      "increase": 15209,
+      "large_decrease": 8258,
+      "large_increase": 8460,
+      "stable": 106560
+    },
+    "training_rows": 156534,
+    "training_target_max": "2026-10-03"
+  },
+  "wk inc flu hosp": {
+    "anchor": "2026-10-03",
+    "anchor_missing": {},
+    "excluded_locations": [],
+    "interpolated_training_values": 36,
+    "locations": [
+      "01",
+      "02",
+      "04",
+      "05",
+      "06",
+      "08",
+      "09",
+      "10",
+      "11",
+      "12",
+      "13",
+      "15",
+      "16",
+      "17",
+      "18",
+      "19",
+      "20",
+      "21",
+      "22",
+      "23",
+      "24",
+      "25",
+      "26",
+      "27",
+      "28",
+      "29",
+      "30",
+      "31",
+      "32",
+      "33",
+      "34",
+      "35",
+      "36",
+      "37",
+      "38",
+      "39",
+      "40",
+      "41",
+      "42",
+      "44",
+      "45",
+      "46",
+      "47",
+      "48",
+      "49",
+      "50",
+      "51",
+      "53",
+      "54",
+      "55",
+      "56",
+      "72",
+      "US"
+    ],
+    "training_rows": 39266
+  },
+  "wk inc flu prop ed visits": {
+    "anchor": "2026-10-03",
+    "anchor_missing": {
+      "19": "2026-06-27"
+    },
+    "excluded_locations": [
+      "72"
+    ],
+    "interpolated_training_values": 0,
+    "locations": [
+      "01",
+      "02",
+      "04",
+      "05",
+      "06",
+      "08",
+      "09",
+      "10",
+      "11",
+      "12",
+      "13",
+      "15",
+      "16",
+      "17",
+      "18",
+      "19",
+      "20",
+      "21",
+      "22",
+      "23",
+      "24",
+      "25",
+      "26",
+      "27",
+      "28",
+      "29",
+      "30",
+      "31",
+      "32",
+      "33",
+      "34",
+      "35",
+      "36",
+      "37",
+      "38",
+      "39",
+      "40",
+      "41",
+      "42",
+      "44",
+      "45",
+      "46",
+      "47",
+      "48",
+      "49",
+      "50",
+      "51",
+      "53",
+      "54",
+      "55",
+      "56",
+      "US"
+    ],
+    "training_rows": 38691
+  }
+}
