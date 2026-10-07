@@ -3,11 +3,11 @@
   "run_id": "previews/2026-10-03/20260930T200838933452Z",
   "reference_date": "2026-10-03",
   "preview": true,
-  "report_sha256": "0068320cced1843533dde3f99b24313527d7863c4734b536976f6dd44ef898d9",
+  "report_sha256": "a5eb7a8550e339e5dd877e8b5c3799548be0b8a27aed4770588c1dfa68f7dd86",
   "forecast_output_hashes": {
     "model-output/MIGHTE-Base/2026-10-03-MIGHTE-Base.csv": "0f4601c5930a808ca17bd1db41b8d9a050b0e690202ea9c0bd3b8cfe7e7acdf0",
     "model-output/MIGHTE-Linear/2026-10-03-MIGHTE-Linear.csv": "cd979ee66e08fe860ee84a7703d5040be14c973f0b084d845debbc0b7716e299",
     "model-output/MIGHTE-Nsemble/2026-10-03-MIGHTE-Nsemble.csv": "1166ded0b84c6e596a556ea7028d4b316ff0c985fc9972f2264121f32715d44c"
   },
-  "published_at": "2026-10-07T20:15:55.775703+00:00"
+  "published_at": "2026-10-07T20:29:03.231848+00:00"
 }
