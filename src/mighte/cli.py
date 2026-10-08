@@ -41,6 +41,8 @@ def main():
             p.add_argument("--refresh", action="store_true", help="Refresh revised truth before recalculating accuracy")
             p.add_argument("--no-open", action="store_true")
             p.add_argument("--offline", action="store_true", help="Skip fetching public benchmark forecasts")
+            p.add_argument("--include-pr", type=int, action="append", default=[], metavar="NUMBER",
+                           help="Include an open hub PR in a local-only comparison (repeatable)")
         if command == "submit":
             p.add_argument("--yes", action="store_true", help="Confirm that these exact files were reviewed")
         if command == "publish":
@@ -49,6 +51,9 @@ def main():
     p.add_argument("--yes", action="store_true", help="Confirm that the metadata and PR text were reviewed")
     sub.add_parser("check", help="Check local metadata, environment and fixed model settings")
     args = parser.parse_args()
+    if args.command == "review" and args.include_pr:
+        if args.offline or any(number <= 0 for number in args.include_pr):
+            parser.error("--include-pr requires positive PR numbers and an online review")
     root = project_root()
     try:
         if args.command == "refresh":
@@ -80,7 +85,7 @@ def main():
             if args.refresh:
                 refresh(root)
             run = args.run or latest_run(root, preview=args.preview)
-            path = build_report(root, run, online=not args.offline)
+            path = build_report(root, run, online=not args.offline, include_prs=args.include_pr)
         elif args.command == "validate":
             run = args.run or latest_run(root, preview=args.preview)
             manifest = verify_run(root, run)

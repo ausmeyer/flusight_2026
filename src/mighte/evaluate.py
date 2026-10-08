@@ -4,13 +4,14 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import requests
 
-from .contract import CATEGORIES, ED, HOSP, MODELS, QUANTILES, TREND, UNIT, Contract, check_window, read_forecast
+from .contract import CATEGORIES, COLUMNS, ED, HOSP, MODELS, QUANTILES, TREND, UNIT, Contract, check_window, read_forecast
 from .data import API, HUB
 from .ordinal import category_labels, validate_probabilities
 from .pipeline import verify_run
@@ -152,6 +153,70 @@ def fetch_benchmarks(root: Path, references: list[str], *, online=True, catalog=
                 frames.append(frame.assign(model_id=model))
             status.append({"model": model, "reference_date": reference, "status": state})
     return (pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()), status
+
+
+def fetch_pr_forecasts(root: Path, numbers, references) -> tuple[pd.DataFrame, list[dict]]:
+    """Load explicitly requested open PRs for display only, apart from the merged forecast cache."""
+    frames, sources = [], []
+
+    def github(path, **kwargs):
+        response = requests.get(API + path, timeout=(15, 40), **kwargs)
+        response.raise_for_status()
+        return response.json()
+
+    for number in sorted(set(numbers)):
+        if number <= 0:
+            raise ValueError("PR numbers must be positive")
+        pr = github(f"pulls/{number}")
+        if pr["state"] != "open":
+            raise ValueError(f"PR #{number} is not open; merged submissions are available with normal review")
+        revision = pr["head"]["sha"]
+        repo = (pr["head"]["repo"] or {}).get("full_name", "")
+        if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or not re.fullmatch(r"[0-9a-f]{40}", revision):
+            raise ValueError(f"PR #{number} has no accessible source commit")
+        files = []
+        for page in range(1, (pr["changed_files"] + 99) // 100 + 1):
+            files.extend(github(f"pulls/{number}/files", params={"per_page": 100, "page": page}))
+        if len(files) != pr["changed_files"]:
+            raise ValueError(f"PR #{number} file list is incomplete; try reviewing again")
+        imported = []
+        for entry in files:
+            match = re.fullmatch(r"model-output/([A-Za-z0-9][A-Za-z0-9_.-]*)/(\d{4}-\d{2}-\d{2})-\1\.csv", entry["filename"])
+            if not match or entry["status"] == "removed" or match[2] not in references:
+                continue
+            model, reference = match.groups()
+            url = f"https://raw.githubusercontent.com/{repo}/{revision}/{entry['filename']}"
+            response = requests.get(url, timeout=(15, 40))
+            response.raise_for_status()
+            frame = read_forecast(BytesIO(response.content))
+            if set(frame.columns) != set(COLUMNS) or frame.empty or set(frame.reference_date) != {reference}:
+                raise ValueError(f"PR #{number}: invalid forecast columns or reference date in {entry['filename']}")
+            supported = ((frame.target.isin([HOSP, ED]) & frame.output_type.eq("quantile"))
+                         | (frame.target.eq(TREND) & frame.output_type.eq("pmf")))
+            frame = frame[supported & frame.horizon.isin([0, 1, 2, 3])].copy()
+            if frame.empty:
+                continue
+            frame["value"] = pd.to_numeric(frame.value, errors="raise")
+            expected = pd.to_datetime(reference) + pd.to_timedelta(frame.horizon * 7, unit="D")
+            if (frame.isna().any().any() or not np.isfinite(frame.value).all() or (frame.value < 0).any()
+                    or not expected.eq(pd.to_datetime(frame.target_end_date)).all()
+                    or frame.duplicated(UNIT + ["output_type", "output_type_id"]).any()):
+                raise ValueError(f"PR #{number}: invalid or duplicate forecast rows in {entry['filename']}")
+            label = f"{model} (pending PR #{number})"
+            frames.append(frame.assign(model_id=label))
+            path = root / "data/benchmarks/pull-requests" / str(number) / revision / entry["filename"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(response.content)
+            imported.append({"model": model, "model_id": label, "reference_date": reference,
+                             "url": url, "sha256": digest(path)})
+        if not imported:
+            raise ValueError(f"PR #{number} has no supported forecasts for this report's weeks")
+        latest = github(f"pulls/{number}")
+        if latest["head"]["sha"] != revision or latest["state"] != "open":
+            raise ValueError(f"PR #{number} changed during download; try reviewing again")
+        sources.append({"number": number, "url": f"https://github.com/cdcepi/FluSight-forecast-hub/pull/{number}",
+                        "head_sha": revision, "retrieved_at": utc_now(), "files": imported})
+    return (pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()), sources
 
 
 def wis(y: np.ndarray, q: np.ndarray) -> np.ndarray:

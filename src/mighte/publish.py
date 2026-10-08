@@ -48,6 +48,8 @@ def prepare_publication(root: Path, run: Path, *, preview=False) -> tuple[bytes,
     expected = {"run_id": manifest["run_id"], "manifest_sha256": digest(run / "manifest.json"),
                 "report_sha256": html_hash, "data_sha256": digest(directory / "report-data.json")}
     payload = json.loads((directory / "report-data.json").read_text())
+    if payload.get("included_prs"):
+        raise ValueError("Reports containing pending PR forecasts are local-only; rebuild without --include-pr")
     if json.loads((directory / "review.json").read_text()) != expected or payload["manifest"] != manifest:
         raise ValueError("Report or forecast changed after review generation; rebuild and review it again")
     return html, {"generator": GENERATOR, "run_id": manifest["run_id"],

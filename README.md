@@ -30,6 +30,8 @@ To reopen the latest report:
 ./mighte review --preview
 ```
 
+To compare an open FluSight hub PR locally, add `--include-pr NUMBER` to `review` (repeat it for multiple PRs). Pending forecasts are labeled and excluded from accuracy scores; the comparison report is saved separately and cannot be published. This option requires an internet connection.
+
 Data snapshots, forecasts, and reports are saved locally under `data/snapshots/`, `runs/` (`previews/` and `official_submissions/`), and `reports/`; `./mighte publish` also commits a reviewed run's forecast files to `forecasts/` on `main` ([docs/PUBLISHING.md](docs/PUBLISHING.md)). Rerunning a preview or forecast for the same reference date replaces the earlier run and its report once the new run completes; a submitted run is kept as the record of what the hub received.
 
 ### Windows

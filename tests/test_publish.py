@@ -36,6 +36,16 @@ def test_preparation_preserves_exact_reviewed_bytes(reviewed):
     assert metadata["forecast_output_hashes"] == manifest["output_hashes"]
 
 
+def test_pending_pr_comparison_cannot_be_published_even_if_copied_to_official_report(reviewed):
+    root, run, directory, manifest = reviewed
+    write_json(directory / "report-data.json", {"manifest": manifest, "included_prs": [{"number": 3766}]})
+    review = json.loads((directory / "review.json").read_text())
+    review["data_sha256"] = digest(directory / "report-data.json")
+    write_json(directory / "review.json", review)
+    with pytest.raises(ValueError, match="pending PR forecasts are local-only"):
+        publish.prepare_publication(root, run)
+
+
 @pytest.mark.parametrize("changed", ["index.html", "report-data.json", "manifest.json"])
 def test_changed_artifacts_require_another_review(reviewed, changed):
     root, run, directory, _ = reviewed

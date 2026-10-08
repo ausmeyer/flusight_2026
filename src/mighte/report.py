@@ -11,7 +11,7 @@ from plotly.offline import get_plotlyjs
 
 from .contract import CATEGORIES, HOSP, TREND, UNIT, Contract, read_forecast
 from .data import latest_snapshot, verify_snapshot
-from .evaluate import LOCAL_BASELINE, TREND_BASELINE, discover_benchmarks, evaluate, preview_runs, summarize
+from .evaluate import LOCAL_BASELINE, TREND_BASELINE, discover_benchmarks, evaluate, fetch_pr_forecasts, preview_runs, summarize
 from .pipeline import verify_run
 from .util import digest, utc_now, write_json
 
@@ -33,7 +33,9 @@ def model_color(name: str) -> str:
     return "#" + "".join(f"{round(channel * 255):02x}" for channel in rgb)
 
 
-def build_report(root: Path, run: Path, *, online=True) -> Path:
+def build_report(root: Path, run: Path, *, online=True, include_prs=()) -> Path:
+    if include_prs and not online:
+        raise ValueError("--include-pr requires an online review")
     manifest = verify_run(root, run)
     snapshot = latest_snapshot(root)
     verify_snapshot(snapshot)
@@ -58,6 +60,11 @@ def build_report(root: Path, run: Path, *, online=True) -> Path:
              for day, path in previews.items() if day not in official
              for filename in verify_run(root, path)["output_hashes"]]
     forecasts = pd.concat(([archive] if not archive.empty else []) + shown + [current], ignore_index=True)
+    included_prs = []
+    if include_prs:
+        pending, included_prs = fetch_pr_forecasts(root, include_prs, set(forecasts.reference_date))
+        # Scores and baselines were already computed using only the official archive.
+        forecasts = pd.concat([forecasts, pending], ignore_index=True)
     quantiles = forecasts[forecasts.output_type.eq("quantile")].copy()
     quantiles["output_type_id"] = pd.to_numeric(quantiles.output_type_id)
     quantiles = quantiles[quantiles.output_type_id.isin([.025, .25, .5, .75, .975])]
@@ -80,6 +87,12 @@ def build_report(root: Path, run: Path, *, online=True) -> Path:
                "default_models": ["MIGHTE-Base"],
                "model_colors": {m: model_color(m) for m in set(forecasts.model_id) | set(comparison_models)}}
     output = root / "reports" / manifest["run_id"]
+    if included_prs:
+        payload["included_prs"] = included_prs
+        payload["model_colors"].update({f["model_id"]: model_color(f["model"])
+                                        for pr in included_prs for f in pr["files"]})
+        output = root / "reports/local-comparisons" / manifest["run_id"] / (
+            "pr-" + "-".join(str(pr["number"]) for pr in included_prs))
     output.mkdir(parents=True, exist_ok=True)
     if not scores.empty:
         scores.to_csv(output / "scores.csv", index=False)
