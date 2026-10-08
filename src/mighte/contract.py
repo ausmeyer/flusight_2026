@@ -14,6 +14,8 @@ import yaml
 HOSP = "wk inc flu hosp"
 ED = "wk inc flu prop ed visits"
 TREND = "wk flu hosp rate change"
+PEAK_HEIGHT = "peak inc flu hosp"
+PEAK_WEEK = "peak week inc flu hosp"
 MODELS = ("MIGHTE-Base", "MIGHTE-Linear", "MIGHTE-Nsemble")
 COLUMNS = ["reference_date", "target", "horizon", "target_end_date", "location",
            "output_type", "output_type_id", "value"]

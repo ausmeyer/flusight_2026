@@ -7,7 +7,7 @@ import pytest
 import requests
 
 from mighte import cli, evaluate, report
-from mighte.contract import HOSP
+from mighte.contract import HOSP, PEAK_HEIGHT, PEAK_WEEK
 from mighte.util import digest, write_json
 
 
@@ -64,6 +64,14 @@ def test_pr_files_are_paginated(tmp_path, pending_pr):
     assert sum(url.endswith("/files") for url in pending_pr["calls"]) == 2
 
 
+def test_peak_only_pr_accepts_missing_weekly_fields(tmp_path, pending_pr, peak_forecasts):
+    pending_pr["csv"] = peak_forecasts.to_csv(index=False).encode()
+    frame, _ = evaluate.fetch_pr_forecasts(tmp_path, [3766], {"2026-10-10"})
+    assert set(frame.target) == {PEAK_HEIGHT, PEAK_WEEK}
+    assert frame.horizon.isna().all() and frame.target_end_date.isna().all()
+    assert len(frame[frame.target.eq(PEAK_WEEK)]) == 34
+
+
 @pytest.mark.parametrize("problem,message", [
     ("closed", "not open"), ("different_week", "no supported forecasts"),
     ("removed", "no supported forecasts"), ("truncated", "incomplete"),
@@ -94,8 +102,9 @@ def test_bad_or_changed_pr_does_not_produce_a_comparison(tmp_path, pending_pr, f
 
 
 @pytest.mark.parametrize("preview", [False, True])
+@pytest.mark.parametrize("include_peaks", [False, True])
 def test_pending_report_preserves_official_report_scores_and_model_colors(
-        root, tmp_path, monkeypatch, forecast, pending_pr, preview):
+        root, tmp_path, monkeypatch, forecast, peak_forecasts, pending_pr, preview, include_peaks):
     kind = "previews" if preview else "official_submissions"
     run = tmp_path / "runs" / kind / "2026-10-10/fixture"
     filename = "model-output/MIGHTE-Base/2026-10-10-MIGHTE-Base.csv"
@@ -118,8 +127,11 @@ def test_pending_report_preserves_official_report_scores_and_model_colors(
     monkeypatch.setattr(evaluate, "load_archive", lambda root:
                         pd.DataFrame() if preview else forecast.assign(model_id="MIGHTE-Base"))
     # The same model can have a merged forecast and a pending revision without replacing either.
-    monkeypatch.setattr(evaluate, "fetch_benchmarks", lambda *a, **k:
-                        (forecast.assign(model_id="UMass-flusion", value=1), []))
+    merged = forecast.assign(model_id="UMass-flusion", value=1)
+    if include_peaks:
+        merged = pd.concat([merged, peak_forecasts.assign(model_id="UMass-flusion")], ignore_index=True)
+        pending_pr["csv"] = pd.concat([forecast, peak_forecasts]).to_csv(index=False).encode()
+    monkeypatch.setattr(evaluate, "fetch_benchmarks", lambda *a, **k: (merged, []))
     normal = report.build_report(tmp_path, run, online=False)
     before = {p: p.read_bytes() for directory in [normal.parent, run] for p in directory.rglob("*") if p.is_file()}
     comparison = report.build_report(tmp_path, run, include_prs=[3766])
@@ -135,6 +147,14 @@ def test_pending_report_preserves_official_report_scores_and_model_colors(
     assert payload["model_colors"]["UMass-flusion (pending PR #3766)"] == report.model_color("UMass-flusion")
     assert payload["default_models"] == ["MIGHTE-Base"]
     assert payload["included_prs"][0]["number"] == 3766
+    if include_peaks:
+        assert len(payload["peak_height_forecasts"]) == 2
+        assert len(payload["peak_week_forecasts"]) == 68
+        assert payload["peak_height_forecasts"][0]["median"] == 2100
+        assert all("horizon" not in row and "target_end_date" not in row
+                   for name in ["peak_height_forecasts", "peak_week_forecasts"] for row in payload[name])
+    else:
+        assert payload["peak_height_forecasts"] == payload["peak_week_forecasts"] == []
 
 
 def test_review_cli_passes_optional_prs_without_submission_or_publication(root, monkeypatch, capsys):

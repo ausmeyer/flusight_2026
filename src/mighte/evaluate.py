@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from .contract import CATEGORIES, COLUMNS, ED, HOSP, MODELS, QUANTILES, TREND, UNIT, Contract, check_window, read_forecast
+from .contract import CATEGORIES, COLUMNS, ED, HOSP, MODELS, PEAK_HEIGHT, PEAK_WEEK, QUANTILES, TREND, UNIT, Contract, check_window, read_forecast
 from .data import API, HUB
 from .ordinal import category_labels, validate_probabilities
 from .pipeline import verify_run
@@ -103,6 +103,16 @@ def load_archive(root: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+def display_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    weekly = (((frame.target.isin([HOSP, ED]) & frame.output_type.eq("quantile"))
+               | (frame.target.eq(TREND) & frame.output_type.eq("pmf")))
+              & frame.horizon.isin([0, 1, 2, 3]))
+    seasonal = (((frame.target.eq(PEAK_HEIGHT) & frame.output_type.eq("quantile"))
+                 | (frame.target.eq(PEAK_WEEK) & frame.output_type.eq("pmf")))
+                & frame.horizon.isna() & frame.target_end_date.isna())
+    return frame[weekly | seasonal].copy()
+
+
 def fetch_benchmarks(root: Path, references: list[str], *, online=True, catalog=None) -> tuple[pd.DataFrame, list[dict]]:
     frames, status = [], []
     models = sorted(set(BENCHMARKS) | {f["model"] for f in catalog["files"]}) if catalog else BENCHMARKS
@@ -145,10 +155,7 @@ def fetch_benchmarks(root: Path, references: list[str], *, online=True, catalog=
                 status.append({"model": model, "reference_date": reference, "status": state, "reason": str(exc)})
                 if not path.exists():
                     continue
-            frame = read_forecast(path)
-            supported = ((frame.target.isin([HOSP, ED]) & frame.output_type.eq("quantile"))
-                         | (frame.target.eq(TREND) & frame.output_type.eq("pmf")))
-            frame = frame[supported & frame.horizon.isin([0, 1, 2, 3])]
+            frame = display_rows(read_forecast(path))
             if not frame.empty:
                 frames.append(frame.assign(model_id=model))
             status.append({"model": model, "reference_date": reference, "status": state})
@@ -191,15 +198,15 @@ def fetch_pr_forecasts(root: Path, numbers, references) -> tuple[pd.DataFrame, l
             frame = read_forecast(BytesIO(response.content))
             if set(frame.columns) != set(COLUMNS) or frame.empty or set(frame.reference_date) != {reference}:
                 raise ValueError(f"PR #{number}: invalid forecast columns or reference date in {entry['filename']}")
-            supported = ((frame.target.isin([HOSP, ED]) & frame.output_type.eq("quantile"))
-                         | (frame.target.eq(TREND) & frame.output_type.eq("pmf")))
-            frame = frame[supported & frame.horizon.isin([0, 1, 2, 3])].copy()
+            frame = display_rows(frame)
             if frame.empty:
                 continue
             frame["value"] = pd.to_numeric(frame.value, errors="raise")
-            expected = pd.to_datetime(reference) + pd.to_timedelta(frame.horizon * 7, unit="D")
-            if (frame.isna().any().any() or not np.isfinite(frame.value).all() or (frame.value < 0).any()
-                    or not expected.eq(pd.to_datetime(frame.target_end_date)).all()
+            weekly = frame[~frame.target.isin([PEAK_HEIGHT, PEAK_WEEK])]
+            expected = pd.to_datetime(reference) + pd.to_timedelta(weekly.horizon * 7, unit="D")
+            if (frame.drop(columns=["horizon", "target_end_date"]).isna().any().any()
+                    or weekly.isna().any().any() or not np.isfinite(frame.value).all() or (frame.value < 0).any()
+                    or not expected.eq(pd.to_datetime(weekly.target_end_date)).all()
                     or frame.duplicated(UNIT + ["output_type", "output_type_id"]).any()):
                 raise ValueError(f"PR #{number}: invalid or duplicate forecast rows in {entry['filename']}")
             label = f"{model} (pending PR #{number})"
@@ -227,7 +234,7 @@ def wis(y: np.ndarray, q: np.ndarray) -> np.ndarray:
 def score_quantiles(forecasts: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
     if forecasts.empty:
         return pd.DataFrame()
-    frame = forecasts[forecasts.output_type.eq("quantile")].copy()
+    frame = forecasts[forecasts.target.isin([HOSP, ED]) & forecasts.output_type.eq("quantile")].copy()
     if frame.empty:
         return pd.DataFrame()
     frame["output_type_id"] = pd.to_numeric(frame.output_type_id)

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mighte.contract import COLUMNS, HOSP, QUANTILES
+from mighte.contract import COLUMNS, HOSP, PEAK_HEIGHT, PEAK_WEEK, QUANTILES
 
 
 @pytest.fixture
@@ -19,6 +19,18 @@ def forecast():
                           "location": "01", "output_type": "quantile", "output_type_id": float(q),
                           "value": int(i + 10 + h)}
                          for h in range(4) for i, q in enumerate(QUANTILES)], columns=COLUMNS)
+
+
+@pytest.fixture
+def peak_forecasts(forecast):
+    height = forecast[forecast.horizon.eq(0)].assign(target=PEAK_HEIGHT, horizon=np.nan,
+                                                   target_end_date=None, value=lambda f: f.value * 100)
+    weeks = pd.date_range("2026-10-10", "2027-05-29", freq="W-SAT")
+    timing = pd.DataFrame({"reference_date": "2026-10-10", "target": PEAK_WEEK,
+                           "horizon": np.nan, "target_end_date": None, "location": "01",
+                           "output_type": "pmf", "output_type_id": weeks.strftime("%Y-%m-%d"),
+                           "value": np.arange(1, len(weeks) + 1) / sum(range(1, len(weeks) + 1))})
+    return pd.concat([height, timing], ignore_index=True)
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 from plotly.offline import get_plotlyjs
 
-from .contract import CATEGORIES, HOSP, TREND, UNIT, Contract, read_forecast
+from .contract import CATEGORIES, ED, HOSP, PEAK_HEIGHT, PEAK_WEEK, TREND, UNIT, Contract, read_forecast
 from .data import latest_snapshot, verify_snapshot
 from .evaluate import LOCAL_BASELINE, TREND_BASELINE, discover_benchmarks, evaluate, fetch_pr_forecasts, preview_runs, summarize
 from .pipeline import verify_run
@@ -65,7 +65,7 @@ def build_report(root: Path, run: Path, *, online=True, include_prs=()) -> Path:
         pending, included_prs = fetch_pr_forecasts(root, include_prs, set(forecasts.reference_date))
         # Scores and baselines were already computed using only the official archive.
         forecasts = pd.concat([forecasts, pending], ignore_index=True)
-    quantiles = forecasts[forecasts.output_type.eq("quantile")].copy()
+    quantiles = forecasts[forecasts.target.isin([HOSP, ED]) & forecasts.output_type.eq("quantile")].copy()
     quantiles["output_type_id"] = pd.to_numeric(quantiles.output_type_id)
     quantiles = quantiles[quantiles.output_type_id.isin([.025, .25, .5, .75, .975])]
     chart = quantiles.pivot(index=["model_id", *UNIT], columns="output_type_id", values="value").reset_index()
@@ -73,12 +73,21 @@ def build_report(root: Path, run: Path, *, online=True, include_prs=()) -> Path:
     categorical = forecasts[forecasts.target.eq(TREND) & forecasts.output_type.eq("pmf")]
     category_chart = categorical.pivot(index=["model_id", *UNIT], columns="output_type_id", values="value").reindex(
         columns=CATEGORIES).dropna().reset_index() if not categorical.empty else pd.DataFrame()
+    peak_keys = ["model_id", "reference_date", "target", "location"]
+    height = forecasts[forecasts.target.eq(PEAK_HEIGHT) & forecasts.output_type.eq("quantile")].copy()
+    height["output_type_id"] = pd.to_numeric(height.output_type_id)
+    height_chart = height.pivot(index=peak_keys, columns="output_type_id", values="value").reindex(
+        columns=[.025, .25, .5, .75, .975]).dropna().reset_index().rename(
+        columns={.025: "lo95", .25: "lo50", .5: "median", .75: "hi50", .975: "hi95"})
+    timing_chart = forecasts[forecasts.target.eq(PEAK_WEEK) & forecasts.output_type.eq("pmf")][
+        peak_keys + ["output_type_id", "value"]].rename(columns={"output_type_id": "peak_week", "value": "probability"})
     truth = pd.read_csv(snapshot / "truth.csv", dtype={"location": str})
     locations = pd.read_csv(snapshot / "contract/locations.csv", dtype={"location": str})
     payload = {"manifest": manifest, "generated_at": utc_now(), "truth_snapshot": snapshot.name,
                "data_audit": json.loads((run / "data-audit.json").read_text()),
                "forecasts": records(chart), "truth": records(truth[["date", "target", "location", "value"]]),
                "categorical_forecasts": records(category_chart), "categories": CATEGORIES,
+               "peak_height_forecasts": records(height_chart), "peak_week_forecasts": records(timing_chart),
                "scores": records(scores.drop(columns=[c for c in scores.columns if isinstance(c, float) or c in CATEGORIES], errors="ignore")),
                "locations": records(locations[["location", "location_name"]]),
                "benchmarks": [catalog_status, *benchmark_status],
@@ -141,7 +150,7 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 <div class="head"><div><div class="eyebrow">MIGHTE / FLUSIGHT 2026–27</div><h1>Weekly forecast review</h1></div></div>
 <div id="notices" class="notices" hidden><strong>Data notes</strong><ul></ul></div>
 <section class="card"><h2>Prospective forecasts</h2><div class="controls">
-<label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">ED visits</option><option value="wk flu hosp rate change">Hospitalization trend</option></select></label>
+<label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">ED visits</option><option value="wk flu hosp rate change">Hospitalization trend</option><option value="peak week inc flu hosp">Peak timing</option><option value="peak inc flu hosp">Peak height</option></select></label>
 <label>Location<select id="location"></select></label>
 <div class="model-control"><span>Models</span><details id="model-picker" class="model-picker"><summary id="model-summary" aria-label="Models">1 selected</summary>
 <div class="model-panel"><input id="model-search" class="model-search" type="search" aria-label="Search models" placeholder="Search models">
@@ -153,7 +162,7 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 </div></div><label>Ground-truth history<select id="history"><option value="recent">Recent</option><option value="year">Past year</option><option value="two_years">Past two years</option><option value="all">All available</option></select></label></div>
 <div id="chart"></div>
 </section>
-<section class="card"><h2>Prospective accuracy to date</h2><div class="controls">
+<section id="accuracy-card" class="card"><h2>Prospective accuracy to date</h2><div class="controls">
 <label>Comparison baseline<select id="baseline"></select></label>
 <label>Scoring locations<select id="scope"><option value="states">States + DC</option><option value="states_pr">States + DC + Puerto Rico</option><option value="US">United States</option><option value="all">All (includes national)</option><option value="selected">Selected location above</option></select></label>
 <label>Horizon<select id="horizon"><option value="all">All horizons</option><option value="0">0 · nowcast</option><option value="1">1 week ahead</option><option value="2">2 weeks ahead</option><option value="3">3 weeks ahead</option></select></label>
@@ -162,7 +171,8 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 const D=__DATA__;
 const el=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const options=(id,items)=>{el(id).innerHTML=items.map(([v,t])=>`<option value="${esc(v)}">${esc(t)}</option>`).join('')};
-const TREND='wk flu hosp rate change',allForecasts=[...D.forecasts,...D.categorical_forecasts];
+const TREND='wk flu hosp rate change',PEAK_WEEK='peak week inc flu hosp',PEAK_HEIGHT='peak inc flu hosp';
+const allForecasts=[...D.forecasts,...D.categorical_forecasts,...D.peak_height_forecasts,...D.peak_week_forecasts];
 const references=[...new Set(allForecasts.map(r=>r.reference_date))].sort();
 const seasonYear=Number(D.manifest.settings.season.split('-')[0]);
 options('reference',[...references].reverse().map(x=>[x,x]));el('reference').value=D.manifest.reference_date;
@@ -173,6 +183,7 @@ const modelNames=[...new Set([...allForecasts.map(r=>r.model_id),...D.comparison
 const colors=D.model_colors;
 el('models').innerHTML=modelNames.map(m=>`<label><input type="checkbox" value="${esc(m)}" ${D.default_models.includes(m)?'checked':''}><span class="swatch" aria-hidden="true" style="background:${colors[m]}"></span>${esc(m)}</label>`).join('');
 const selectedModels=()=>[...el('models').querySelectorAll('input:checked')].map(x=>x.value);
+let selectionGroup='weekly';const selections={};
 const rgba=(hex,a)=>`rgba(${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)},${a})`;
 const shiftDate=(date,days)=>new Date(Date.parse(date)+days*86400000).toISOString().slice(0,10);
 function probabilityPlot(ref,loc,chosen){
@@ -190,7 +201,38 @@ layout['yaxis'+suffix]={type:'category',domain,anchor:'x'+suffix,showgrid:false,
 if(!models.length)layout.annotations.push({text:'No selected forecasts for this week and location.',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false});
 el('chart').style.height=height+'px';Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
 }
+function peakPlot(ref,loc,target,chosen){
+const timing=target===PEAK_WEEK,source=timing?D.peak_week_forecasts:D.peak_height_forecasts;
+const rows=source.filter(r=>r.reference_date===ref&&r.location===loc&&chosen.includes(r.model_id)),traces=[];
+const models=chosen.filter(m=>rows.some(r=>r.model_id===m));
+const layout={margin:{t:timing?65:25,b:65,l:timing?75:165,r:25},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},annotations:[],showlegend:timing};
+if(timing){
+models.forEach(model=>{const values=rows.filter(r=>r.model_id===model).sort((a,b)=>a.peak_week.localeCompare(b.peak_week));
+traces.push({type:'scatter',mode:'lines+markers',name:model,x:values.map(r=>r.peak_week),y:values.map(r=>r.probability),line:{color:colors[model],width:2.5},marker:{size:6},hovertemplate:`${esc(model)}<br>Week ending %{x|%b %-d, %Y}<br>Probability: %{y:.1%}<extra></extra>`})});
+const weeks=[...new Set(source.map(r=>r.peak_week))].sort();
+layout.xaxis={type:'date',title:{text:'Peak week ending'},tickformat:'%b %-d<br>%Y',tickmode:'array',tickvals:weeks.filter((_,i)=>i%4===0),gridcolor:'#edf1f3',...(weeks.length?{range:[shiftDate(weeks[0],-3),shiftDate(weeks[weeks.length-1],3)]}:{})};
+layout.yaxis={title:{text:'Probability of peak'},tickformat:'.0%',rangemode:'tozero',gridcolor:'#edf1f3'};
+layout.legend={orientation:'h',y:1.18,maxheight:.25};
+}else{
+models.forEach(model=>{const r=rows.find(r=>r.model_id===model),c=colors[model];
+[['lo95','hi95',2],['lo50','hi50',8]].forEach(([lo,hi,width])=>traces.push({type:'scatter',mode:'lines',x:[r[lo],r[hi]],y:[model,model],line:{color:c,width},hoverinfo:'skip',showlegend:false}));
+traces.push({type:'scatter',mode:'markers',x:[r.median],y:[model],marker:{color:c,size:10,line:{color:'white',width:1}},customdata:[[r.lo50,r.hi50,r.lo95,r.hi95]],hovertemplate:`${esc(model)}<br>Median: %{x:,.0f}<br>50% interval: %{customdata[0]:,.0f}–%{customdata[1]:,.0f}<br>95% interval: %{customdata[2]:,.0f}–%{customdata[3]:,.0f}<extra></extra>`});
+});
+layout.xaxis={title:{text:'Peak weekly hospital admissions'},rangemode:'tozero',gridcolor:'#edf1f3'};
+layout.yaxis={type:'category',categoryorder:'array',categoryarray:models,autorange:'reversed',automargin:true,ticklabelstandoff:12,showgrid:false};
+}
+if(!models.length)layout.annotations.push({text:'No selected peak forecasts for this week and location.',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false});
+el('chart').style.height=(timing?440:Math.max(350,models.length*48+90))+'px';
+Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
+}
 function plot(){const ref=el('reference').value,target=el('target').value,loc=el('location').value,mult=target.includes('prop')?100:1;
+const peak=[PEAK_WEEK,PEAK_HEIGHT].includes(target),group=peak?target:'weekly';
+if(group!==selectionGroup){
+selections[selectionGroup]=selectedModels();
+const available=modelNames.filter(m=>allForecasts.some(r=>r.target===target&&r.model_id===m&&r.reference_date===ref&&r.location===loc));
+const chosen=new Set(selections[group]||[available.includes('FluSight-ensemble')?'FluSight-ensemble':available[0]].filter(Boolean));
+el('models').querySelectorAll('input').forEach(input=>input.checked=chosen.has(input.value));selectionGroup=group;
+}
 const index=references.indexOf(ref);el('week-slider').value=index;el('week-slider').setAttribute('aria-valuetext',ref);
 el('previous-week').disabled=index<=0;el('next-week').disabled=index>=references.length-1;
 el('models').querySelectorAll('input').forEach(input=>{input.disabled=!allForecasts.some(r=>r.target===target&&r.model_id===input.value)});
@@ -201,7 +243,9 @@ const previousBaseline=el('baseline').value;
 const baselines=target===TREND?D.baseline_models.filter(m=>D.categorical_forecasts.some(r=>r.model_id===m)):D.baseline_models.filter(m=>m!==D.trend_baseline);
 options('baseline',baselines.length?baselines.map(m=>[m,m]):[['','No comparison available']]);
 el('baseline').value=baselines.includes(previousBaseline)?previousBaseline:baselines.includes(D.trend_baseline)&&target===TREND?D.trend_baseline:baselines[0]||'';
-el('history').parentElement.hidden=target===TREND;
+el('history').parentElement.hidden=target===TREND||peak;
+el('accuracy-card').hidden=peak;
+if(peak){peakPlot(ref,loc,target,chosen);return;}
 if(target===TREND){probabilityPlot(ref,loc,chosen);table();return;}
 el('chart').style.height='';
 const observed=D.truth.filter(r=>r.target===target&&r.location===loc&&r.value!==null).sort((a,b)=>a.date.localeCompare(b.date));
