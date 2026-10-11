@@ -8,17 +8,42 @@
     "locations.csv": "2ca00c89868a39ff2a87bb1bf3ba0abcd3bb77c4a2870abd2b7ff3920db0c1f1"
   },
   "hospitalization_proxy": {
-    "rows": 24691,
+    "rows": 24626,
     "meaning": "ILINet/FluSurv training proxy: original log(rate+1) regression, rate rounded to 2 decimals, original population, count rounding, dates through 2019-06-30 shifted 728 days. Stored as produced; at forecast time each seed week takes the value at its rank in the location's leveled NHSN history."
   },
   "hospitalization_calibration": {
-    "rows": 43506,
-    "regression_rows": 2740,
-    "intercept": 0.5253182615607082,
-    "slope": 0.5895968464296275,
-    "meaning": "Unshifted ILINet/FluSurv predictor counts before count rounding, every week through April 2026 (frozen). The yardstick for leveling the NHSN eras before November 2024 to the current regime."
+    "rows": 43441,
+    "regression_rows": 2710,
+    "intercept": 0.5289954584768035,
+    "slope": 0.5929100476856028,
+    "meaning": "Unshifted ILINet/FluSurv predictor counts before count rounding, every week through April 2026 (frozen). The yardstick for leveling the NHSN eras before November 2024 to the current regime. Refit after the documented pandemic exclusion and US rank normalization."
   },
   "ilinet_normalized": {
-    "meaning": "Original per-location bestNormalize(ILI+1) values from the April 25, 2026 study input. These are transformed inputs, not raw percentages. Also used to build the ED training history: a pooled ED log-odds regression orders the weeks through 2019-06-30, values are quantile-mapped to each location's observed NSSP, and dates shift 728 days."
+    "meaning": "Original per-location bestNormalize(ILI+1) values from the April 25, 2026 study input. These are transformed inputs, not raw percentages. Also used to build the ED training history: a pooled ED log-odds regression orders the weeks through 2019-06-30, values are quantile-mapped to each location's observed NSSP, and dates shift 728 days. Pandemic-window rows removed; US scores renormalized from retained ranks as documented."
+  },
+  "corrected_at": "2026-10-10T22:21:42.729536+00:00",
+  "pandemic_exclusion": {
+    "source_start": "2009-04-01",
+    "source_end": "2010-06-30",
+    "shift_days": 728,
+    "source_rows_removed": 65,
+    "regression_rows_removed": 30,
+    "shifted_start": "2011-03-30",
+    "shifted_end": "2012-06-27",
+    "calendar": "Retained dates stay fixed. Excluded weeks remain missing; interpolation cannot bridge them.",
+    "US_normalization": "Inverse-normal average ranks (rank-0.5)/n from retained US weeks only. Archived monotone scores provide ordering only; their fitted scale is discarded.",
+    "other_normalization": "Unchanged archived scores: no pandemic-window observations exist for these locations.",
+    "builder_sha256": "f70ae0be56159ee86a322eabe937806a007a11fac8b355029e11f3b7dbc762ec",
+    "legacy_input_sha256": {
+      "hospitalization_proxy.csv": "c587f80d6678eed21227a7e72807bd8acf808152b81a1a51fee476f3952ae2f3",
+      "PROVENANCE.json": "ff4b980857f923b3be4bce9fd84a882988f729651f8c41fef1ab130bba72b3c6",
+      "ilinet_normalized.csv": "a46b43a1cc29c5a17d389ca2029459fbf0189928e1b074b11ae615cf4a15a3e6",
+      "hospitalization_calibration.csv": "8b16c184fcc3d83e222555c7bfd960dcdf4d36a949e3d050ddb46a9b7f3e661a"
+    }
+  },
+  "output_sha256": {
+    "hospitalization_proxy.csv": "7154276e744ea5b0ff08a74f6d25835b45150e39f58bef78541b186d0c025abd",
+    "ilinet_normalized.csv": "037d7f78db4e28d90efed29cbfc2c01640b285cbe78f906c370c78e193400ac3",
+    "hospitalization_calibration.csv": "3bc3f5616c9831c72b5bc0f0e6b947ee9b0bd9817321e4cba3c9064c25021395"
   }
 }

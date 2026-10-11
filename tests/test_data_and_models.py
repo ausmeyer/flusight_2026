@@ -9,7 +9,7 @@ from scipy.special import expit
 from mighte import core
 from mighte.contract import ED, HOSP
 from mighte.data import (API, Downloader, choose_truth, clean_truth, wastewater_weekly, weekly_grid, WW,
-                         ed_ilinet_proxy, hospitalization_history)
+                         ed_ilinet_proxy, hospitalization_history, PANDEMIC_MODEL_WINDOW, PANDEMIC_SOURCE_WINDOW)
 from mighte.models import equal_quantiles
 from mighte.panel_ar import PanelARRuntime, prepare_panel_ar_table
 
@@ -62,6 +62,82 @@ def test_no_endpoint_extrapolation():
     assert grid.total_hosp.iloc[1] == 4
     assert pd.isna(grid.total_hosp.iloc[-1])
     assert filled == 1
+
+
+def test_exclusion_preserves_calendar_and_blocks_interpolation():
+    dates = pd.date_range("2011-03-12", "2012-07-14", freq="W-SAT")
+    frame = pd.DataFrame({"location_name": "US", "date": dates, "total_hosp": 10.})
+    frame.loc[frame.date.between(*PANDEMIC_MODEL_WINDOW), "total_hosp"] = 1e9
+    frame.loc[frame.date.isin(pd.to_datetime(["2011-03-19", "2011-03-26", "2012-06-30"])), "total_hosp"] = np.nan
+    actual, filled = weekly_grid(frame, dates[-1], excluded_window=PANDEMIC_MODEL_WINDOW)
+    pd.testing.assert_index_equal(pd.DatetimeIndex(actual.date), pd.DatetimeIndex(dates, name="date"))
+    assert actual.loc[actual.date.between(*PANDEMIC_MODEL_WINDOW), "total_hosp"].isna().all()
+    assert actual.loc[actual.date.eq("2012-06-30"), "total_hosp"].isna().all()
+    assert actual.loc[actual.date.eq("2012-07-07"), "total_hosp"].item() == 10.
+    assert filled == 0
+
+
+def test_bundled_reconstruction_excludes_original_and_shifted_pandemic(root):
+    for filename, window in [("ilinet_normalized.csv", PANDEMIC_SOURCE_WINDOW),
+                             ("hospitalization_calibration.csv", PANDEMIC_SOURCE_WINDOW),
+                             ("hospitalization_proxy.csv", PANDEMIC_MODEL_WINDOW)]:
+        frame = pd.read_csv(root / "data/historical" / filename, parse_dates=["date"])
+        assert not frame.date.between(*window).any()
+    provenance = json.loads((root / "data/historical/PROVENANCE.json").read_text())
+    assert provenance["hospitalization_calibration"]["regression_rows"] == 2710
+    assert provenance["pandemic_exclusion"]["source_rows_removed"] == 65
+
+
+def test_features_keep_calendar_lags_and_missing_growth_across_exclusion(root):
+    dates = pd.date_range("2011-03-12", "2013-07-13", freq="W-SAT")
+    history = pd.DataFrame({"date": dates, "location_name": "US", "total_hosp": np.arange(len(dates)) + 10.})
+    history.loc[history.date.between(*PANDEMIC_MODEL_WINDOW), "total_hosp"] = np.nan
+    config = json.loads((root / "config/settings.json").read_text())
+    features = core.build_feature_table(history, core.RuntimeConfig.from_dict(config["runtime"]))
+    first_after = features[features.date.eq("2012-06-30")].iloc[0]
+    assert pd.isna(first_after.y_lag_1) and pd.isna(first_after.y_lag_52)
+    assert pd.isna(first_after.y_pct_change_1) and pd.isna(first_after.y_pct_change_4)
+    before = features[features.date.between(*PANDEMIC_MODEL_WINDOW)]
+    assert before.y_pct_change_1.isna().all()
+    last = features[features.date.eq("2013-07-06")].iloc[0]
+    assert last.y_lag_52 == history.loc[history.date.eq("2012-07-07"), "total_hosp"].item()
+
+
+def test_excluded_seed_values_cannot_affect_training_or_shift_dates(root, tmp_path):
+    shutil.copytree(root / "data/historical", tmp_path / "data/historical")
+    dates = pd.date_range("2021-07-03", "2026-10-03", freq="W-SAT")
+    observed = pd.DataFrame({"date": dates, "location_name": "US", "total_hosp": np.arange(len(dates)) + 10.})
+    clean, filled, _ = hospitalization_history(tmp_path, observed, dates[-1])
+    path = tmp_path / "data/historical/hospitalization_proxy.csv"
+    seed = pd.read_csv(path, parse_dates=["date"])
+    poison = pd.DataFrame({"date": pd.date_range(*PANDEMIC_MODEL_WINDOW, freq="W-SAT"),
+                           "location_name": "US", "total_hosp": 1e12})
+    pd.concat([seed, poison], ignore_index=True).to_csv(path, index=False)
+    actual, poisoned_filled, _ = hospitalization_history(tmp_path, observed, dates[-1])
+    pd.testing.assert_frame_equal(actual, clean)
+    assert filled == poisoned_filled
+    assert actual.loc[actual.date.between(*PANDEMIC_MODEL_WINDOW), "total_hosp"].isna().all()
+    expected = pd.date_range(actual.date.min(), dates[-1], freq="W-SAT")
+    np.testing.assert_array_equal(actual.date.to_numpy(), expected.to_numpy())
+    current = actual[actual.date.ge("2024-11-02")].merge(observed, on=["date", "location_name"])
+    np.testing.assert_array_equal(current.total_hosp_x, current.total_hosp_y)
+
+
+def test_ed_regression_and_ranks_ignore_pandemic_rows(root, tmp_path):
+    shutil.copytree(root / "data/historical", tmp_path / "data/historical")
+    path = tmp_path / "data/historical/ilinet_normalized.csv"
+    ili = pd.read_csv(path, parse_dates=["date"])
+    observed = ili[ili.location_name.eq("US") & ili.date.ge("2022-10-01")].copy()
+    observed["total_hosp"] = 100 * expit(-5 + .4 * observed.ili)
+    observed = observed[["location_name", "date", "total_hosp"]]
+    clean, audit = ed_ilinet_proxy(tmp_path, observed, ED_TRANSFORM)
+    poison = pd.DataFrame({"date": pd.date_range(*PANDEMIC_SOURCE_WINDOW, freq="W-SAT"),
+                           "location_name": "US", "ili": 1e12})
+    pd.concat([ili, poison], ignore_index=True).to_csv(path, index=False)
+    polluted = pd.concat([observed, poison.rename(columns={"ili": "total_hosp"})])
+    actual, after = ed_ilinet_proxy(tmp_path, polluted, ED_TRANSFORM)
+    pd.testing.assert_frame_equal(clean, actual)
+    assert audit == after and not actual.date.between(*PANDEMIC_MODEL_WINDOW).any()
 
 
 def test_wastewater_equal_site_and_calendar_lags():

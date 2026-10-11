@@ -14,9 +14,11 @@ import numpy as np
 import pandas as pd
 from threadpoolctl import threadpool_limits
 
-from .contract import COLUMNS, ED, HOSP, TREND, MODELS, EASTERN, Contract, check_window, read_forecast
+from .contract import COLUMNS, ED, HOSP, PEAK_HEIGHT, PEAK_WEEK, TREND, MODELS, EASTERN, Contract, check_window, read_forecast
 from .data import latest_released_reference, prepare_inputs, refresh, verify_snapshot
 from .models import covariate_weeks, distributional, equal_quantiles, linear, persistence_baseline
+from .peak_height import predict as predict_peak_height
+from .peak_timing import predict as predict_peak_timing
 from .util import code_hash, digest, utc_now, write_json
 
 
@@ -27,7 +29,8 @@ COMPONENTS = {"base-hospitalizations": (HOSP, ("ww", "nssp")), "ww-hospitalizati
 FALLBACK = {HOSP: "fallback-hospitalizations", ED: "fallback-ed"}
 COMPONENT_LABELS = {"base-hospitalizations": "MIGHTE-Base admissions", "ww-hospitalizations": "the Nsemble wastewater part",
                     "nssp-hospitalizations": "the Nsemble NSSP part", "base-ed": "MIGHTE-Base ED visits",
-                    "base-ordinal": "MIGHTE-Base trends"}
+                    "base-ordinal": "MIGHTE-Base trends", "base-peak-height": "MIGHTE-Base peak height",
+                    "base-peak-timing": "MIGHTE-Base peak timing"}
 
 
 def environment() -> dict:
@@ -69,6 +72,98 @@ def check_reference_date(reference: str) -> None:
         raise ValueError(f"Reference date {reference} must be a Saturday written YYYY-MM-DD, as in FluSight")
 
 
+def fit_seasonal(run, snapshot, reference, settings, audit, target=PEAK_HEIGHT):
+    """The seasonal component follows Base's location and surveillance fallbacks."""
+    key, predictor = {PEAK_HEIGHT: ("peak_height", predict_peak_height),
+                      PEAK_WEEK: ("peak_timing", predict_peak_timing)}[target]
+    component = "base-" + key.replace("_", "-")
+    contract = Contract(snapshot / "contract")
+    names = dict(zip(contract.locations.location, contract.locations.location_name))
+    missing = set(audit[HOSP]["anchor_missing"])
+    anchored = [names[x] for x in audit[HOSP]["locations"] if x not in missing]
+    fallback = [names[x] for x in missing]
+    if all(audit["covariates"][key]["available"] for key in ["ww", "nssp"]):
+        calls = [(component, ("ww", "nssp"), anchored), (component + "-fallback", (), fallback)]
+    else:
+        calls = [(component, (), anchored + fallback)]
+    history = pd.read_csv(run / "hospitalization-training.csv", parse_dates=["date"])
+    frames, fits = [], {}
+    for name, signals, locations in calls:
+        if not locations:
+            continue
+        path, checkpoint = run / "components" / f"{name}.csv", run / "checkpoints" / name
+        if not path.exists():
+            with threadpool_limits(limits=int(settings["threads"])):
+                result = predictor({"reference_date": reference, "snapshot_path": snapshot,
+                    "hospitalization_history": history, "settings": settings, "checkpoint_path": checkpoint,
+                    "signals": signals, "locations": locations})
+            write_forecast(path, result)
+        frame = read_forecast(path)
+        contract.validate(frame, "MIGHTE-Base", reference, preview=True)
+        if set(frame.target) != {target} or set(frame.location) != {location for location in names if names[location] in locations}:
+            raise ValueError(f"Incomplete {key.replace('_', '-')} forecast coverage")
+        frames.append(frame)
+        fits[name] = json.loads((checkpoint / "fit.json").read_text())
+    audit[key] = fits
+    write_json(run / "data-audit.json", audit)
+    return pd.concat(frames, ignore_index=True)
+
+
+def preview_seasonal(root: Path, source: Path, *, target=PEAK_HEIGHT, resume: Path | None = None) -> Path:
+    """Fit one seasonal component in a separate preview, preserving other frozen forecasts."""
+    settings = json.loads((root / "config/settings.json").read_text())
+    if target == PEAK_HEIGHT and not settings.get("peak_height"):
+        raise ValueError("Enable peak_height in config/settings.json before making this preview")
+    if resume:
+        run = resume
+        manifest = json.loads((run / "manifest.json").read_text())
+        if (manifest["code_sha256"] != code_hash(root) or manifest["environment"] != environment()
+                or manifest["settings_sha256"] != digest(root / "config/settings.json")
+                or manifest["historical_input_hashes"] != input_hashes(root, settings)):
+            raise ValueError("Preview code, settings, historical inputs or environment changed; start a new run")
+        if manifest["status"] == "complete":
+            verify_run(root, run)
+            return run
+        settings = manifest["settings"]
+    original = verify_run(root, source)
+    if target == PEAK_HEIGHT and original["preview"]:
+        raise ValueError("Peak-height --reuse-run requires a frozen official run")
+    reference = original["reference_date"]
+    snapshot = root / "data/snapshots" / original["snapshot_id"]
+    if not resume:
+        run = root / "runs/previews" / reference / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        run.mkdir(parents=True)
+        for filename in ["hospitalization-training.csv", "ed-training.csv", "data-audit.json", "local-baseline.csv"]:
+            if (source / filename).exists():
+                shutil.copy2(source / filename, run / filename)
+        shutil.copytree(source / "model-output", run / "model-output")
+        manifest = {**original, "run_id": str(run.relative_to(root / "runs")), "status": "running",
+                    "preview": True, "quick": False, "created_at": utc_now(), "settings": settings,
+                    "settings_sha256": digest(root / "config/settings.json"), "code_sha256": code_hash(root),
+                    "environment": environment(), "historical_input_hashes": input_hashes(root, settings),
+                    "reused_run": original["run_id"], "reused_manifest_sha256": digest(source / "manifest.json"),
+                    "reused_output_hashes": original["output_hashes"], "seasonal_preview_target": target}
+        manifest.pop("completed_at", None)
+        write_json(run / "manifest.json", manifest)
+    (run / "components").mkdir(exist_ok=True)
+    audit = json.loads((run / "data-audit.json").read_text())
+    peak = fit_seasonal(run, snapshot, reference, settings, audit, target)
+    base_path = run / f"model-output/MIGHTE-Base/{reference}-MIGHTE-Base.csv"
+    base = read_forecast(base_path)
+    write_forecast(base_path, pd.concat([base[base.target.ne(target)], peak], ignore_index=True))
+    contract = Contract(snapshot / "contract")
+    validation = {model: contract.validate(read_forecast(run / filename), model, reference, preview=True)
+                  for filename in original["output_hashes"] for model in [Path(filename).parent.name]}
+    manifest.update(status="complete", completed_at=utc_now(), validation=validation,
+                    output_hashes={f: digest(run / f) for f in original["output_hashes"]})
+    write_json(run / "manifest.json", manifest)
+    verify_run(root, run)
+    write_json(root / "runs/latest-preview.json", {"run_id": manifest["run_id"]})
+    replace_earlier_runs(root, run)
+    print(f"Validated {target} preview: {run}", flush=True)
+    return run
+
+
 def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=False,
                   resume: Path | None = None, snapshot: Path | None = None) -> Path:
     """A preview without a reference date anchors to the most recent week with released data."""
@@ -80,6 +175,9 @@ def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=Fal
     if resume:
         run = resume
         manifest = json.loads((run / "manifest.json").read_text())
+        if manifest.get("reused_run"):
+            return preview_seasonal(root, root / "runs" / manifest["reused_run"],
+                                    target=manifest.get("seasonal_preview_target", PEAK_HEIGHT), resume=run)
         if manifest["code_sha256"] != code_hash(root) or manifest["environment"] != environment():
             raise ValueError("Code or numerical environment changed; start a new run")
         if manifest["settings_sha256"] != digest(root / "config/settings.json"):
@@ -154,8 +252,12 @@ def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=Fal
         if missing[target] or any(t == target and name not in jobs for name, (t, _) in COMPONENTS.items()):
             jobs[FALLBACK[target]] = (target, (), True)
     use_ordinal = bool(settings.get("ordinal_plugin")) and HOSP in histories
+    use_peak = bool(settings.get("peak_height")) and HOSP in histories
+    use_timing = bool(settings.get("peak_timing")) and HOSP in histories
     replaced = [name for name, (t, _) in COMPONENTS.items() if t in histories and name not in jobs
-                and not all(available.values())] + (["base-ordinal"] if use_ordinal and not all(available.values()) else [])
+                and not all(available.values())] + (["base-ordinal"] if use_ordinal and not all(available.values()) else []) + (
+                ["base-peak-height"] if use_peak and not all(available.values()) else []) + (
+                ["base-peak-timing"] if use_timing and not all(available.values()) else [])
     if replaced:
         lost = " and ".join(label for key, label in [("nssp", "National NSSP"), ("ww", "WastewaterSCAN")]
                             if not available[key])
@@ -232,12 +334,18 @@ def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=Fal
             write_json(run / "data-audit.json", audit)
 
     forecasts = {}
+    peak = fit_seasonal(run, snapshot, reference, settings, audit) if use_peak else None
+    timing = fit_seasonal(run, snapshot, reference, settings, audit, PEAK_WEEK) if use_timing else None
     if HOSP in histories:
         base = [part(results.get("base-hospitalizations"), HOSP)]
         if ED in histories:
             base.append(part(results.get("base-ed"), ED))
         if ordinal is not None:
             base.append(ordinal)
+        if peak is not None:
+            base.append(peak)
+        if timing is not None:
+            base.append(timing)
         forecasts["MIGHTE-Base"] = pd.concat(base, ignore_index=True)
         forecasts["MIGHTE-Linear"] = part(linear_frame, HOSP)
         ensemble = None if linear_frame is None else equal_quantiles(
@@ -249,7 +357,7 @@ def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=Fal
 
     validation = {}
     for model, frame in forecasts.items():
-        hosp = frame.target.eq(HOSP)
+        hosp = frame.target.isin([HOSP, PEAK_HEIGHT])
         frame.loc[hosp, "value"] = np.rint(frame.loc[hosp, "value"])
         # The hub flags quantiles above ED 0.25 or admissions of 30% of population; review, not changed.
         flagged = contract.implausible_units(frame)
@@ -266,6 +374,10 @@ def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=Fal
                 actual = set(frame.loc[frame.target.eq(target) & frame.horizon.eq(horizon), "location"])
                 if actual != expected:
                     raise ValueError(f"Incomplete forecast coverage in {model}, {target}, horizon {horizon}")
+        if model == "MIGHTE-Base":
+            for target, component in [(PEAK_HEIGHT, peak), (PEAK_WEEK, timing)]:
+                if component is not None and set(frame.loc[frame.target.eq(target), "location"]) != set(audit[HOSP]["locations"]):
+                    raise ValueError(f"Incomplete {target} forecast coverage")
         path = run / "model-output" / model / f"{reference}-{model}.csv"
         write_forecast(path, frame)
         # Validate the serialized bytes, which are exactly what will be submitted.

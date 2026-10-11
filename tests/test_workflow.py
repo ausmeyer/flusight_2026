@@ -28,6 +28,8 @@ def synthetic_project(root, tmp_path, *, with_ordinal=True, mutate=None):
     settings["threads"] = 2
     settings["component_workers"] = 1
     settings["ordinal_plugin"] = "mighte.ordinal:predict" if with_ordinal else None
+    settings["peak_height"] = False
+    settings["peak_timing"] = False
     write_json(tmp_path / "config/settings.json", settings)
     snapshot = tmp_path / "data/snapshots/test-snapshot"
     shutil.copytree(root / "hub-contract", snapshot / "contract")
@@ -353,17 +355,17 @@ def test_registration_cancellation_makes_no_github_request(root, monkeypatch, ca
     assert "Registration cancelled" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("joint_designated", [False, True])
-def test_registration_includes_joint_retirement_and_enforces_two_designated(root, tmp_path, monkeypatch, joint_designated):
+@pytest.mark.parametrize("linear_designated", [False, True])
+def test_registration_includes_only_submission_models_and_enforces_two_designated(root, tmp_path, monkeypatch, linear_designated):
     from mighte import submit as submission
     from mighte.contract import Contract
 
     shutil.copytree(root / "model-metadata", tmp_path / "model-metadata")
     (tmp_path / "docs").mkdir()
     shutil.copyfile(root / "docs/REGISTRATION_PR.md", tmp_path / "docs/REGISTRATION_PR.md")
-    joint = tmp_path / "model-metadata/MIGHTE-Joint.yml"
-    if joint_designated:
-        joint.write_text(joint.read_text().replace("designated_model: false", "designated_model: true"))
+    linear = tmp_path / "model-metadata/MIGHTE-Linear.yml"
+    if linear_designated:
+        linear.write_text(linear.read_text().replace("designated_model: false", "designated_model: true"))
     monkeypatch.setattr(submission, "fresh_contract", lambda _: Contract(root / "hub-contract"))
     calls = []
 
@@ -372,7 +374,7 @@ def test_registration_includes_joint_retirement_and_enforces_two_designated(root
         return "reviewed-metadata-pr"
 
     monkeypatch.setattr(submission, "create_pr", capture_pr)
-    if joint_designated:
+    if linear_designated:
         with pytest.raises(ValueError, match="More than two designated"):
             submission.register(tmp_path)
         assert calls == []
@@ -380,7 +382,7 @@ def test_registration_includes_joint_retirement_and_enforces_two_designated(root
         assert submission.register(tmp_path) == "reviewed-metadata-pr"
         assert len(calls) == 1
         assert set(calls[0]) == {"model-metadata/MIGHTE-Base.yml", "model-metadata/MIGHTE-Linear.yml",
-                                 "model-metadata/MIGHTE-Nsemble.yml", "model-metadata/MIGHTE-Joint.yml"}
+                                 "model-metadata/MIGHTE-Nsemble.yml"}
 
 
 def test_a_completed_run_replaces_earlier_runs_for_the_same_date(tmp_path):

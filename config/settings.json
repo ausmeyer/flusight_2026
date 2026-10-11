@@ -61,7 +61,7 @@
     "scale_ridge": 0.02,
     "joint_iterations": 5,
     "scale_max_iterations": 100,
-    "note": "Both panel AR models directly predict log1p(y[t+h])-log1p(y[t]) from features ending at t. The latest one-week difference is log1p(y[t])-log1p(y[t-1]), and integration begins from y[t] only."
+    "note": "MIGHTE-Linear directly predicts log1p(y[t+h])-log1p(y[t]) from features ending at t. The latest one-week difference is log1p(y[t])-log1p(y[t-1]), and integration begins from y[t] only."
   },
   "ed_history": {
     "mode": "ilinet_proxy"
@@ -71,6 +71,8 @@
     "boundary_epsilon": 0.00005
   },
   "ordinal_plugin": "mighte.ordinal:predict",
+  "peak_height": true,
+  "peak_timing": true,
   "threads": 4,
   "component_workers": 2
 }

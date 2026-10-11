@@ -1,6 +1,8 @@
 # Frozen model design
 
-The prospective study window is the 2026–27 FluSight season. Models are fixed before this window; prospective errors do not change features, model selection, quantile weights or calibration. The original study implementations are carried into `src/mighte/core.py` and `src/mighte/panel_ar.py`; their source hashes are in `port-provenance.json`. No runtime import or file reference points to the study directory.
+The prospective study window is the 2026–27 FluSight season. Prospective errors do not change features, quantile weights or calibration. The implementations are in `src/mighte/core.py`, `src/mighte/panel_ar.py`, and the target-specific modules under `src/mighte/`.
+
+All hospitalization components derive both predictors and training labels from Base's reconstructed and historically adjusted hospitalization series. Raw hospitalization observations update that series and provide the observed outcomes for dashboard display and accuracy scoring.
 
 ## Boosted components
 
@@ -22,6 +24,10 @@ The operational port matches target observations by exact calendar date, and inp
 ## MIGHTE-Base-Ordinal
 
 A separate pooled five-class LightGBM classifier supplies the hospitalization rate-change probabilities within the MIGHTE-Base submission. It uses the same hospitalization, seasonality, wastewater level/lags 1, 2, 4 and national NSSP level/lags 1, 2, 4 feature table as Base, with identical source availability rules. Each of 100 season-resampled fits minimizes multiclass log loss for 250 boosting rounds. Final probabilities are the arithmetic mean across fits. This component does not use or categorize Base's quantitative forecasts. See [ORDINAL.md](ORDINAL.md) for the label construction and audit.
+
+MIGHTE-Base also includes a separate direct peak-height regression when `peak_height` is enabled. It uses completed-season maxima from Base's reconstructed and historically adjusted hospitalization series as labels, the same series for predictors plus surveillance lags, and Gaussian spread learned from whole-season forward predictions. See [PEAK_HEIGHT.md](PEAK_HEIGHT.md) for the seasonal window, fitting and preview workflow.
+
+With `peak_timing` enabled, MIGHTE-Base includes a binary past-peak classifier and a conditional two-stage forecast of future peak timing, using the same reconstructed history, seasonal predictors and wastewater/NSSP lags. See [PEAK_TIMING.md](PEAK_TIMING.md) for the construction and probability support.
 
 ## MIGHTE-Linear
 

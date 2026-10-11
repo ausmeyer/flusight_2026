@@ -230,7 +230,10 @@ const peak=[PEAK_WEEK,PEAK_HEIGHT].includes(target),group=peak?target:'weekly';
 if(group!==selectionGroup){
 selections[selectionGroup]=selectedModels();
 const available=modelNames.filter(m=>allForecasts.some(r=>r.target===target&&r.model_id===m&&r.reference_date===ref&&r.location===loc));
-const chosen=new Set(selections[group]||[available.includes('FluSight-ensemble')?'FluSight-ensemble':available[0]].filter(Boolean));
+const defaults=target===PEAK_HEIGHT?modelNames.filter(m=>D.peak_height_forecasts.some(r=>r.model_id===m)):
+target===PEAK_WEEK?['FluSight-ensemble'].filter(m=>D.peak_week_forecasts.some(r=>r.model_id===m)):
+[D.default_models.find(m=>available.includes(m))||(available.includes('FluSight-ensemble')?'FluSight-ensemble':available[0])].filter(Boolean);
+const chosen=new Set(selections[group]||defaults);
 el('models').querySelectorAll('input').forEach(input=>input.checked=chosen.has(input.value));selectionGroup=group;
 }
 const index=references.indexOf(ref);el('week-slider').value=index;el('week-slider').setAttribute('aria-valuetext',ref);

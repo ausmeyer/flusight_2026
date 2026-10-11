@@ -225,15 +225,23 @@ def verify_snapshot(directory: Path) -> dict:
     return manifest
 
 
-def weekly_grid(frame: pd.DataFrame, anchor: pd.Timestamp, *, interpolate=True) -> tuple[pd.DataFrame, int]:
+def weekly_grid(frame: pd.DataFrame, anchor: pd.Timestamp, *, interpolate=True,
+                excluded_window=None) -> tuple[pd.DataFrame, int]:
     """Complete weekly grid per location; inside-only linear interpolation, never extrapolation."""
     parts, interpolated = [], 0
     for location, group in frame.groupby("location_name", sort=True):
         values = group.set_index("date").total_hosp.sort_index()
         values = values.reindex(pd.date_range(values.first_valid_index(), anchor, freq="W-SAT"))
+        if excluded_window is not None:
+            values.loc[(values.index >= excluded_window[0]) & (values.index <= excluded_window[1])] = np.nan
         if interpolate:
             before = values.isna().sum()
-            values = values.interpolate(method="linear", limit_area="inside")
+            if excluded_window is None:
+                values = values.interpolate(method="linear", limit_area="inside")
+            else:
+                # Structural exclusions are barriers, including for interpolation on either side.
+                for keep in [values.index < excluded_window[0], values.index > excluded_window[1]]:
+                    values.loc[keep] = values.loc[keep].interpolate(method="linear", limit_area="inside")
             interpolated += int(before - values.isna().sum())
         parts.append(pd.DataFrame({"location_name": location, "date": values.index,
                                     "total_hosp": values.to_numpy()}))
@@ -248,6 +256,9 @@ VOLUNTARY_REPORTING = (pd.Timestamp("2024-05-01"), pd.Timestamp("2024-09-30"))
 IN_SEASON, OFF_SEASON = [11, 12, 1, 2, 3, 4], [5, 6, 7, 8, 9]
 LEVEL_BOUNDS = (0.5, 2.0)
 NHSN_START = pd.Timestamp("2021-07-01")  # the ILINet/FluSurv seed covers earlier weeks
+HISTORICAL_SHIFT = pd.Timedelta(days=728)
+PANDEMIC_SOURCE_WINDOW = (pd.Timestamp("2009-04-01"), pd.Timestamp("2010-06-30"))
+PANDEMIC_MODEL_WINDOW = tuple(day + HISTORICAL_SHIFT for day in PANDEMIC_SOURCE_WINDOW)
 # The log level changes linearly over the four weeks after mandatory reporting ended and the five
 # weeks in which hospitals resumed reporting before the November 2024 mandate.
 LEVEL_RAMPS = [("2024-04-27", "2024-05-25"), ("2024-09-28", "2024-11-02")]
@@ -322,9 +333,11 @@ def hospitalization_history(root: Path, observed: pd.DataFrame, anchor: pd.Times
     history, all from data available at the anchor."""
     observed = observed[observed.date.le(anchor)]
     seed = pd.read_csv(root / "data/historical/hospitalization_proxy.csv", parse_dates=["date"])
-    seed = seed[seed.location_name.isin(observed.location_name.unique()) & seed.date.le(anchor)]
+    seed = seed[seed.location_name.isin(observed.location_name.unique()) & seed.date.le(anchor)
+                & ~seed.date.between(*PANDEMIC_MODEL_WINDOW)]
     model = pd.concat([seed, observed[observed.date.ge(NHSN_START)]], ignore_index=True)
-    history, filled = weekly_grid(model[["location_name", "date", "total_hosp"]], anchor)
+    history, filled = weekly_grid(model[["location_name", "date", "total_hosp"]], anchor,
+                                 excluded_window=PANDEMIC_MODEL_WINDOW)
     predictor = pd.read_csv(root / "data/historical/hospitalization_calibration.csv", parse_dates=["date"],
                             float_precision="round_trip")
     levels = era_levels(observed, predictor[predictor.date.le(anchor)])
@@ -343,7 +356,9 @@ def ed_ilinet_proxy(root: Path, observed: pd.DataFrame, transform: dict) -> tupl
     """
     epsilon = boundary_epsilon(transform)
     ili = pd.read_csv(root / "data/historical/ilinet_normalized.csv", parse_dates=["date"])
+    ili = ili[~ili.date.between(*PANDEMIC_SOURCE_WINDOW)].copy()
     observed = observed.dropna(subset=["total_hosp"])
+    observed = observed[~observed.date.between(*PANDEMIC_SOURCE_WINDOW)]
     paired = ili.merge(observed, on=["location_name", "date"], validate="one_to_one")
     if len(paired) < 52 or paired.ili.std() < 1e-8:
         raise ValueError("At least 52 paired weeks with varying ILINet are required for ED reconstruction")
@@ -357,7 +372,7 @@ def ed_ilinet_proxy(root: Path, observed: pd.DataFrame, transform: dict) -> tupl
         values = observed.loc[observed.location_name.eq(name), "total_hosp"].to_numpy()
         parts.append(pd.Series(np.round(np.quantile(values, rank), 2), index=weeks.index))
     proxy["total_hosp"] = pd.concat(parts)
-    proxy["date"] += pd.Timedelta(days=728)
+    proxy["date"] += HISTORICAL_SHIFT
     return proxy[["location_name", "date", "total_hosp"]], {
         "mode": "ilinet_proxy", "proxy_rows": len(proxy), "mapping_rows": len(paired),
         "mapping_locations": int(paired.location_name.nunique()), "coefficients": coefficients.tolist(),
@@ -415,7 +430,7 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
             if mode == "ilinet_proxy":
                 proxy, audit["ed_reconstruction"] = ed_ilinet_proxy(root, model[model.date.le(anchor)], settings["ed_target_transform"])
                 model, n_filled = weekly_grid(model, anchor)
-                proxy, _ = weekly_grid(proxy, proxy.date.max())
+                proxy, _ = weekly_grid(proxy, proxy.date.max(), excluded_window=PANDEMIC_MODEL_WINDOW)
                 # Keep the gap between the proxy and observed eras missing rather than interpolated.
                 model, _ = weekly_grid(pd.concat([proxy, model]), anchor, interpolate=False)
             elif mode == "observed":
@@ -433,4 +448,8 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
         inputs[target] = model
         audit[target].update(training_rows=len(model), interpolated_training_values=n_filled)
     audit["notices"] = notices
+    audit["historical_exclusion"] = {
+        "source_window": [str(day.date()) for day in PANDEMIC_SOURCE_WINDOW],
+        "shifted_window": [str(day.date()) for day in PANDEMIC_MODEL_WINDOW],
+        "interpolation": "Excluded weeks remain missing"}
     return inputs, audit

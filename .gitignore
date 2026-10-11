@@ -13,3 +13,4 @@ reports/
 .runtime/
 dist/
 build/
+/test_peak_timing_backtest/

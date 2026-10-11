@@ -8,12 +8,12 @@ from pathlib import Path
 
 import requests
 
-from .contract import MODELS, Contract, reference_saturday
+from .contract import MODELS, PEAK_HEIGHT, PEAK_WEEK, Contract, reference_saturday
 from .data import refresh, latest_snapshot
-from .pipeline import latest_run, print_notices, run_forecasts, verify_run
+from .pipeline import latest_run, preview_seasonal, print_notices, run_forecasts, verify_run
 from .publish import archive_run, prepare_publication, publish_report, repository
 from .report import build_report
-from .submit import REGISTRATION_MODELS, register, submit
+from .submit import register, submit
 from .util import project_root
 
 
@@ -29,6 +29,8 @@ def main():
         if command == "preview":
             p.add_argument("--quick", action="store_true", help="Two bags and fewer rounds; never submittable")
             p.add_argument("--snapshot", type=Path, help="Reuse a local data snapshot for this preview only")
+            p.add_argument("--reuse-run", type=Path, help="Reuse a frozen run and fit only a seasonal component")
+            p.add_argument("--peak-timing", action="store_true", help="With --reuse-run, preview peak timing instead of peak height")
     p = sub.add_parser("resume", help="Continue an interrupted run using its original immutable inputs")
     p.add_argument("run", type=Path)
     p.add_argument("--no-open", action="store_true")
@@ -51,6 +53,10 @@ def main():
     p.add_argument("--yes", action="store_true", help="Confirm that the metadata and PR text were reviewed")
     sub.add_parser("check", help="Check local metadata, environment and fixed model settings")
     args = parser.parse_args()
+    if args.command == "preview" and args.reuse_run and (args.quick or args.snapshot or args.reference_date):
+        parser.error("--reuse-run cannot be combined with --quick, --snapshot or --reference-date")
+    if args.command == "preview" and args.peak_timing and not args.reuse_run:
+        parser.error("--peak-timing requires --reuse-run")
     if args.command == "review" and args.include_pr:
         if args.offline or any(number <= 0 for number in args.include_pr):
             parser.error("--include-pr requires positive PR numbers and an online review")
@@ -60,22 +66,25 @@ def main():
             refresh(root)
             return
         if args.command == "check":
-            Contract(root / "hub-contract").validate_metadata(root / "model-metadata", models=REGISTRATION_MODELS)
+            Contract(root / "hub-contract").validate_metadata(root / "model-metadata")
             from .pipeline import environment
             print(json.dumps(environment(), indent=2))
             print("Metadata and standalone imports OK")
             return
         if args.command == "register":
-            Contract(root / "hub-contract").validate_metadata(root / "model-metadata", models=REGISTRATION_MODELS)
+            Contract(root / "hub-contract").validate_metadata(root / "model-metadata")
             print((root / "docs/REGISTRATION_PR.md").read_text())
-            print("Files: " + ", ".join(f"model-metadata/{model}.yml" for model in REGISTRATION_MODELS))
+            print("Files: " + ", ".join(f"model-metadata/{model}.yml" for model in MODELS))
             if not args.yes and input("Type register to open the CDC metadata pull request: ").strip() != "register":
                 print("Registration cancelled.")
                 return
             print(register(root))
             return
         if args.command in {"forecast", "preview", "resume"}:
-            run = run_forecasts(root, getattr(args, "reference_date", None)
+            if getattr(args, "reuse_run", None):
+                run = preview_seasonal(root, args.reuse_run, target=PEAK_WEEK if args.peak_timing else PEAK_HEIGHT)
+            else:
+                run = run_forecasts(root, getattr(args, "reference_date", None)
                                 or (None if args.command == "preview" else reference_saturday()),
                                 preview=args.command == "preview", quick=getattr(args, "quick", False),
                                 resume=args.run if args.command == "resume" else None,

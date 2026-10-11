@@ -69,25 +69,32 @@ class Contract:
             raise ValueError(f"Unknown submission model: {model}")
         if set(frame.columns) != set(COLUMNS) or len(frame.columns) != len(COLUMNS):
             raise ValueError(f"Exactly these columns are required: {COLUMNS}")
-        if frame.empty or frame.isna().any().any():
+        if frame.empty or frame.drop(columns=["horizon", "target_end_date"]).isna().any().any():
             raise ValueError("Empty forecasts and missing values are forbidden")
         df = frame.copy()
+        seasonal = df.target.isin([PEAK_HEIGHT, PEAK_WEEK])
+        if df.loc[~seasonal].isna().any().any():
+            raise ValueError("Missing values are forbidden for weekly forecasts")
+        if df.loc[seasonal, ["horizon", "target_end_date"]].notna().any().any():
+            raise ValueError("Seasonal peak horizon and target_end_date must be blank")
         for col in ["reference_date", "target_end_date"]:
-            if not df[col].astype(str).str.fullmatch(r"\d{4}-\d{2}-\d{2}").all():
+            dates = df.loc[~seasonal, col] if col == "target_end_date" else df[col]
+            if not dates.astype(str).str.fullmatch(r"\d{4}-\d{2}-\d{2}").all():
                 raise ValueError(f"{col} must use YYYY-MM-DD")
-            dt = pd.to_datetime(df[col], errors="raise")
+            dt = pd.to_datetime(dates, errors="raise")
             if not dt.dt.weekday.eq(5).all():
                 raise ValueError(f"{col} must be Saturday")
         if set(df.reference_date) != {reference}:
             raise ValueError("Reference dates must match the filename/run")
-        h = pd.to_numeric(df.horizon, errors="raise")
+        weekly = df.loc[~seasonal]
+        h = pd.to_numeric(weekly.horizon, errors="raise")
         # These models intentionally submit only horizons 0..3, including the nowcast.
         if not h.isin([0, 1, 2, 3]).all():
             raise ValueError("This pipeline supports only horizons 0, 1, 2, 3")
-        expected = pd.to_datetime(df.reference_date) + pd.to_timedelta(h * 7, unit="D")
-        if not expected.eq(pd.to_datetime(df.target_end_date)).all():
+        expected = pd.to_datetime(weekly.reference_date) + pd.to_timedelta(h * 7, unit="D")
+        if not expected.eq(pd.to_datetime(weekly.target_end_date)).all():
             raise ValueError("target_end_date must equal reference_date + 7*horizon")
-        allowed = {HOSP, ED, TREND} if model == "MIGHTE-Base" else {HOSP}
+        allowed = {HOSP, ED, TREND, PEAK_HEIGHT, PEAK_WEEK} if model == "MIGHTE-Base" else {HOSP}
         if not set(df.target) <= allowed:
             raise ValueError(f"Incorrect targets for {model}")
         df["value"] = pd.to_numeric(df.value, errors="raise")
@@ -102,9 +109,11 @@ class Contract:
                 raise ValueError(f"Invalid location for {target}; preserve leading FIPS zeros")
             if not preview:
                 for name in ["reference_date", "target_end_date"]:
+                    if target in {PEAK_HEIGHT, PEAK_WEEK} and name == "target_end_date":
+                        continue
                     if not set(g[name]) <= set(ids[name]["optional"]):
                         raise ValueError(f"{name} is outside the hub's accepted rounds")
-            output_type = "pmf" if target == TREND else "quantile"
+            output_type = "pmf" if target in {TREND, PEAK_WEEK} else "quantile"
             if set(g.output_type) != {output_type}:
                 raise ValueError(f"{target} requires {output_type}")
             required = task["output_type"][output_type]["output_type_id"]["required"]
@@ -121,7 +130,7 @@ class Contract:
             maximum = task["output_type"][output_type]["value"].get("maximum")
             if maximum is not None and (g.value > maximum).any():
                 raise ValueError(f"{target} values exceed the hub maximum of {maximum}")
-            if target == HOSP:
+            if target in {HOSP, PEAK_HEIGHT}:
                 if not np.equal(g.value, np.floor(g.value)).all():
                     raise ValueError("Hospitalization forecasts must be integer-valued")
                 if (g.value > g.location.map(self.population)).any():

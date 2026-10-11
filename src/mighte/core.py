@@ -82,8 +82,8 @@ def build_feature_table(
 
     df["y_diff_1"] = by_loc["total_hosp"].diff(1)
     df["y_diff_4"] = by_loc["total_hosp"].diff(4)
-    df["y_pct_change_1"] = by_loc["total_hosp"].pct_change(1).replace([np.inf, -np.inf], np.nan)
-    df["y_pct_change_4"] = by_loc["total_hosp"].pct_change(4).replace([np.inf, -np.inf], np.nan)
+    df["y_pct_change_1"] = by_loc["total_hosp"].pct_change(1, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    df["y_pct_change_4"] = by_loc["total_hosp"].pct_change(4, fill_method=None).replace([np.inf, -np.inf], np.nan)
     for window in (2, 4, 8, 12):
         df[f"y_roll_mean_{window}"] = by_loc["total_hosp"].transform(
             lambda s: s.shift(1).rolling(window=window, min_periods=1).mean()
@@ -442,8 +442,10 @@ def fit_lgbm_regressor(
     y: np.ndarray,
     params: dict,
     rounds: int,
+    *,
+    sample_weight: Optional[np.ndarray] = None,
 ) -> lgb.Booster:
-    dtrain = lgb.Dataset(X.astype(float), label=np.asarray(y, dtype=float), params={"verbose": -1})
+    dtrain = lgb.Dataset(X.astype(float), label=np.asarray(y, dtype=float), weight=sample_weight, params={"verbose": -1})
     return lgb.train(params, dtrain, num_boost_round=rounds, callbacks=[])
 
 
@@ -593,14 +595,19 @@ def fit_conditional_gaussian_scale_booster(
     frozen_mu: np.ndarray,
     params: dict,
     rounds: int,
+    *,
+    sample_weight: Optional[np.ndarray] = None,
 ) -> ConditionalGaussianScaleBooster:
     """Fit conditional Gaussian scale by NLL, without a learned-width target or model cap."""
 
     X = X_train.astype(float)
     y = np.asarray(y_train, dtype=float)
     mu = np.asarray(frozen_mu, dtype=float)
-    if len(X) != len(y) or len(y) != len(mu):
+    weights = None if sample_weight is None else np.asarray(sample_weight, dtype=float)
+    if len(X) != len(y) or len(y) != len(mu) or (weights is not None and weights.shape != y.shape):
         raise ValueError("Gaussian scale training inputs must have identical row counts.")
+    if weights is not None and (not np.isfinite(weights).all() or np.any(weights <= 0)):
+        raise ValueError("Gaussian scale training weights must be finite and positive.")
 
     residual = y - mu
     finite = np.isfinite(residual)
@@ -609,19 +616,22 @@ def fit_conditional_gaussian_scale_booster(
         y = y[finite]
         mu = mu[finite]
         residual = residual[finite]
+        if weights is not None:
+            weights = weights[finite]
     if len(y) == 0:
         raise ValueError("Gaussian scale training has no finite residuals.")
 
     # This is the exact constant-sigma Gaussian MLE. It anchors boosting at the
     # likelihood optimum instead of at the midpoint of a user-selected range.
-    base_sigma = float(np.sqrt(np.mean(np.square(residual))))
+    variance = np.mean(np.square(residual)) if weights is None else np.average(np.square(residual), weights=weights)
+    base_sigma = float(np.sqrt(variance))
     base_sigma = max(base_sigma, float(np.exp(LOG_SIGMA_NUMERIC_MIN)))
     base_log_sigma = float(np.log(base_sigma))
 
     objective = ConditionalGaussianLogSigmaObjective(mu, base_log_sigma)
     train_params = dict(params)
     train_params.update({"objective": objective, "metric": "None"})
-    dtrain = lgb.Dataset(X, label=y, params={"verbose": -1}, free_raw_data=False)
+    dtrain = lgb.Dataset(X, label=y, weight=weights, params={"verbose": -1}, free_raw_data=False)
     booster = lgb.train(train_params, dtrain, num_boost_round=rounds, callbacks=[])
     return ConditionalGaussianScaleBooster(booster=booster, base_log_sigma=base_log_sigma)
 

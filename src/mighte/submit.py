@@ -14,7 +14,6 @@ from .pipeline import verify_run
 from .util import digest, utc_now, write_json
 
 UPSTREAM = "cdcepi/FluSight-forecast-hub"
-REGISTRATION_MODELS = (*MODELS, "MIGHTE-Joint")
 
 
 def gh_json(arguments: list[str], payload: dict | None = None):
@@ -94,7 +93,7 @@ def update_pr(root: Path, files: dict[str, Path], pr: dict, fork: str, *, title:
 def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, body: str,
               reference: str | None = None) -> str:
     """Update the open PR for this branch, or build a new commit from upstream main."""
-    if not files or any(not (name in {f"model-metadata/{m}.yml" for m in REGISTRATION_MODELS}
+    if not files or any(not (name in {f"model-metadata/{m}.yml" for m in MODELS}
                               or any(name.startswith(f"model-output/{m}/") and name.endswith(f"-{m}.csv")
                                      for m in MODELS)) for name in files):
         raise ValueError("Refusing to upload files outside the MIGHTE submission allowlist")
@@ -156,10 +155,10 @@ def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, bo
 
 
 def register(root: Path) -> str:
-    fresh_contract(root).validate_metadata(root / "model-metadata", models=REGISTRATION_MODELS)
-    files = {f"model-metadata/{model}.yml": root / "model-metadata" / f"{model}.yml" for model in REGISTRATION_MODELS}
+    fresh_contract(root).validate_metadata(root / "model-metadata")
+    files = {f"model-metadata/{model}.yml": root / "model-metadata" / f"{model}.yml" for model in MODELS}
     return create_pr(root, files, branch="codex/mighte-2026-27-metadata",
-                     title="Register MIGHTE-Base and MIGHTE-Linear; update MIGHTE metadata for 2026–27",
+                     title="Update MIGHTE model metadata for 2026–27",
                      body=(root / "docs/REGISTRATION_PR.md").read_text())
 
 
