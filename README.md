@@ -24,6 +24,15 @@ The quick run downloads current data, fits reduced models, and opens an interact
 ./mighte preview
 ```
 
+With the GitHub CLI (`gh`) installed and signed in, the weekly submission is:
+
+```bash
+./mighte forecast
+./mighte submit
+```
+
+`submit` validates the latest production run and creates or updates the hub PR with the reference date and model names, without an extra confirmation prompt. To submit only after forecasting succeeds, use `./mighte forecast && ./mighte submit`.
+
 To reopen the latest report:
 
 ```bash

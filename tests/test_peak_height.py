@@ -293,6 +293,7 @@ def test_official_pipeline_submits_peak_height_with_other_base_targets(root, tmp
     files, text = uploads[0]
     assert set(files) == set(manifest["output_hashes"])
     assert files[base_path] == (run / base_path).read_bytes()
+    assert text["title"] == "MIGHTE forecasts for 2026-10-10"
     assert text["body"] == "2026-10-10 forecasts from MIGHTE-Base, MIGHTE-Linear, MIGHTE-Nsemble."
     receipt = json.loads((run / "submission.json").read_text())
     assert receipt["output_hashes"] == manifest["output_hashes"]

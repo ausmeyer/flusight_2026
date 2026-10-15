@@ -18,8 +18,9 @@ from .pipeline import verify_run
 from .util import digest, utc_now, write_json
 
 LOCAL_BASELINE = "Local-persistence"
+FLUSIGHT_BASELINE = "FluSight-baseline"
 TREND_BASELINE = "FluSight-baseline_cat"
-BENCHMARKS = ("FluSight-baseline", "FluSight-ensemble", "UMass-flusion", "Google_SAI-FluEns")
+BENCHMARKS = (FLUSIGHT_BASELINE, "FluSight-ensemble", "UMass-flusion", "Google_SAI-FluEns")
 
 
 def discover_benchmarks(root: Path, reference_dates, *, season: str, online=True):
@@ -333,7 +334,7 @@ def relative_scores(group: pd.DataFrame, metric: str, baseline: str) -> dict:
     return {k: v / denominator if denominator > 0 else np.nan for k, v in theta.items()}
 
 
-def summarize(scored: pd.DataFrame, *, baseline=LOCAL_BASELINE, location="states", horizon="all") -> pd.DataFrame:
+def summarize(scored: pd.DataFrame, *, baseline=FLUSIGHT_BASELINE, location="states", horizon="all") -> pd.DataFrame:
     if scored.empty:
         return pd.DataFrame()
     work = scored.copy()
@@ -348,7 +349,7 @@ def summarize(scored: pd.DataFrame, *, baseline=LOCAL_BASELINE, location="states
     records = []
     for target, target_group in work.groupby("target"):
         if target == TREND:
-            trend_baseline = TREND_BASELINE if baseline == LOCAL_BASELINE else baseline
+            trend_baseline = TREND_BASELINE if baseline in {FLUSIGHT_BASELINE, LOCAL_BASELINE} else baseline
             base = target_group[target_group.model_id.eq(trend_baseline)][UNIT + ["rps"]]
             for model, g in target_group.groupby("model_id"):
                 pair = g.merge(base, on=UNIT, suffixes=("", "_baseline"), validate="one_to_one")

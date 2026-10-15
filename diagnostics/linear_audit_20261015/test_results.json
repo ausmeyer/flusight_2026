@@ -1,0 +1,16 @@
+{
+  "repository_data_models_golden_contract": {
+    "passed": 41,
+    "seconds": 3.36
+  },
+  "isolated_synthetic_and_invariants": {
+    "passed": 7,
+    "seconds": 1.93
+  },
+  "repository_workflow_and_PR_review": {
+    "passed": 46,
+    "seconds": 33.51
+  },
+  "total_passed": 94,
+  "workflow_log": "..............................................                           [100%]\n46 passed in 33.51s\n"
+}

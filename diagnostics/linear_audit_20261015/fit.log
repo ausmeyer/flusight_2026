@@ -1,0 +1,3 @@
+Snapshot hashes, exported hashes, and exact raw-to-training reproduction: PASS
+Linear refit 4.4s; 143006 rows x 316 mean terms; max saved-quantile difference 4.67e-08
+Audit complete; protected source/settings/run/review hashes unchanged.

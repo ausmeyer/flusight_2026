@@ -1,0 +1,159 @@
+{
+  "elapsed_seconds": 5.073817166034132,
+  "run_id": "official_submissions/2026-10-17/20261015T043845714774Z",
+  "snapshot_id": "20261015T043834801440Z",
+  "run_code_hash": "f327eccd1661a26e549ef4e52e8ddebc84e4019bb171e297e31251158aa8a845",
+  "current_code_hash": "2fa5c45cadd0ea86973f54f3873fcc5920ad4bd17939c64282afdf524a78a99f",
+  "snapshot_completed": "2026-10-15T04:38:45.684674+00:00",
+  "rows": 143006,
+  "mean_terms": 316,
+  "scale_terms": 10,
+  "train_target_latest": "2026-10-10 00:00:00",
+  "train_origin_latest": "2026-10-03 00:00:00",
+  "test_rows": 212,
+  "optimizer_results": [
+    {
+      "success": true,
+      "message": "CONVERGENCE: NORM_OF_PROJECTED_GRADIENT_<=_PGTOL",
+      "nit": 16,
+      "objective": 0.02383070318196468,
+      "gradient_max_abs": 7.155593102734035e-06
+    },
+    {
+      "success": true,
+      "message": "CONVERGENCE: NORM_OF_PROJECTED_GRADIENT_<=_PGTOL",
+      "nit": 13,
+      "objective": 0.023387958814501484,
+      "gradient_max_abs": 3.5439266179900777e-06
+    },
+    {
+      "success": true,
+      "message": "CONVERGENCE: NORM_OF_PROJECTED_GRADIENT_<=_PGTOL",
+      "nit": 7,
+      "objective": 0.023431501653306153,
+      "gradient_max_abs": 8.459502294177866e-06
+    },
+    {
+      "success": true,
+      "message": "CONVERGENCE: NORM_OF_PROJECTED_GRADIENT_<=_PGTOL",
+      "nit": 3,
+      "objective": 0.023432500936272145,
+      "gradient_max_abs": 4.8792222597181766e-06
+    },
+    {
+      "success": true,
+      "message": "CONVERGENCE: NORM_OF_PROJECTED_GRADIENT_<=_PGTOL",
+      "nit": 0,
+      "objective": 0.023432546894229425,
+      "gradient_max_abs": 4.904970916620125e-06
+    },
+    {
+      "success": true,
+      "message": "CONVERGENCE: NORM_OF_PROJECTED_GRADIENT_<=_PGTOL",
+      "nit": 0,
+      "objective": 0.023432546894229425,
+      "gradient_max_abs": 4.904970916620125e-06
+    }
+  ],
+  "mean_iterations": [
+    {
+      "stage": 0,
+      "us_mu": [
+        0.02416703355068775,
+        0.017328283871165383,
+        -0.0058603234130811255,
+        -0.04382217165132752
+      ],
+      "us_median": [
+        3928.8340187396475,
+        3902.0505546916193,
+        3812.5855415243213,
+        3670.5282246191077
+      ],
+      "mean_weight": 1.0
+    },
+    {
+      "stage": 1,
+      "us_mu": [
+        0.05404956897263036,
+        0.05123962193068041,
+        0.03526888763278592,
+        0.005434794281472019
+      ],
+      "us_median": [
+        4048.03963562743,
+        4036.6780189269366,
+        3972.705539593589,
+        3855.9046255785506
+      ],
+      "mean_weight": 1.0000000000000002
+    },
+    {
+      "stage": 2,
+      "us_mu": [
+        0.056226496030985444,
+        0.05398594436005135,
+        0.038532959547788806,
+        0.009115246419785526
+      ],
+      "us_median": [
+        4056.8637007588786,
+        4047.782025244562,
+        3985.6971915524155,
+        3870.1259328222004
+      ],
+      "mean_weight": 1.0000000000000002
+    },
+    {
+      "stage": 3,
+      "us_mu": [
+        0.05637993829522722,
+        0.054177566281509035,
+        0.038760172923139324,
+        0.00937172604012873
+      ],
+      "us_median": [
+        4057.4863963257967,
+        4048.5579349740915,
+        3986.603125394052,
+        3871.118925067447
+      ],
+      "mean_weight": 1.0
+    },
+    {
+      "stage": 4,
+      "us_mu": [
+        0.05639207605970003,
+        0.05419123310931294,
+        0.03877610544962701,
+        0.009389499915691477
+      ],
+      "us_median": [
+        4057.535657576747,
+        4048.613279963261,
+        3986.666658492589,
+        3871.1877482390096
+      ],
+      "mean_weight": 0.9999999999999998
+    },
+    {
+      "stage": 5,
+      "us_mu": [
+        0.05639207605970003,
+        0.05419123310931294,
+        0.03877610544962701,
+        0.009389499915691477
+      ],
+      "us_median": [
+        4057.535657576747,
+        4048.613279963261,
+        3986.666658492589,
+        3871.1877482390096
+      ],
+      "mean_weight": 0.9999999999999998
+    }
+  ],
+  "max_saved_quantile_absolute_difference": 4.666617314796895e-08,
+  "anchor_missing": {},
+  "interpolated_training_values": 36
+}

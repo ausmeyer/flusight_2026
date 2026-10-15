@@ -1,0 +1,11 @@
+Type,Check,Status,Evidence / limit
+Implementation,Raw-to-training,PASS,Prepared hospitalization training exactly reproduced from the pinned snapshot and bundled historical inputs.
+Implementation,Numerical reproduction,PASS,"143,006 training examples; 316 mean terms; six successful scale optimizations; maximum quantile discrepancy 4.67e-08."
+Implementation,Horizon / leakage / integration,PASS in targeted tests,Exact-calendar labels; t to t+h direct response; h=1..4 maps to hub 0..3; one anchor integration; future-poison invariant passed.
+Implementation,Floor / rounding / fallback / cache,PASS for this run,"All 53 anchors observed, all 212 test rows retained, no hospitalization fallback; submitted values equal rounded Linear component at every key. US floor inactive."
+Implementation,Ensemble / public export / plot,PASS,"4,876 ensemble values equal rounded means of three unrounded components; merged CSVs and live HTML byte-identical; all 1,060 displayed Linear quantiles exact."
+Structural,Absolute level pooled across locations,CONCERN,A shared negative level-by-lead coefficient treats population-scale count differences as forecasting signals; no location-specific lead offsets can absorb them.
+Structural,Historical seed and preliminary slowdown,CONTRIBUTORS / NOT SUFFICIENT,NHSN-only refit remains flat; counterfactual continued newest-week US growth remains flat under frozen coefficients.
+Numerical definition,Normalized inverse-variance weights,SECONDARY CONCERN,"Mean step optimizes normalized weighted ridge, not literal fixed-penalty coordinate Gaussian NLL. Recorded weight mean 2.945; not the flatness explanation by itself."
+Predictive validity,Replacement accuracy / calibration,NOT ASSESSED,No rolling-origin comparison or new calibration performed; current round outcomes not yet known. Ablations do not establish a better forecasting model.
+Provenance,Full run-time source snapshot,LIMITED,"Whole-package code hash differs from the run; package has pre-existing report/evaluation/CLI edits. Relevant Linear reproduction is numerically exact, but no source bundle was stored."

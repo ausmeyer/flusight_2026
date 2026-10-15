@@ -1,0 +1,36 @@
+{
+  "submitted_quantiles": 4876,
+  "rounding_exact": true,
+  "ensemble_unrounded_equal_thirds_then_rounding_exact": true,
+  "plot_comparisons": [
+    {
+      "quantile": 0.025,
+      "rows": 212,
+      "max_difference": 0
+    },
+    {
+      "quantile": 0.25,
+      "rows": 212,
+      "max_difference": 0
+    },
+    {
+      "quantile": 0.5,
+      "rows": 212,
+      "max_difference": 0
+    },
+    {
+      "quantile": 0.75,
+      "rows": 212,
+      "max_difference": 0
+    },
+    {
+      "quantile": 0.975,
+      "rows": 212,
+      "max_difference": 0
+    }
+  ],
+  "truth_snapshot": "20261015T140534003646Z",
+  "truth_rows_compared": 17119,
+  "truth_differences": 0,
+  "live_visual_inspection": "US / 2026-10-17 / hospital admissions / Linear selected; rising observations, flat median and expanding intervals visible."
+}

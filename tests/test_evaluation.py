@@ -24,7 +24,8 @@ def test_wis_equals_weighted_interval_definition():
 
 def test_skill_and_coverage_use_matched_denominators(forecast):
     f = pd.concat([forecast.assign(model_id="MIGHTE-Base"),
-                   forecast[forecast.horizon.eq(0)].assign(model_id=LOCAL_BASELINE, value=0)])
+                   forecast[forecast.horizon.eq(0)].assign(model_id="FluSight-baseline", value=0),
+                   forecast.assign(model_id=LOCAL_BASELINE, value=100)])
     truth = pd.DataFrame({"target": HOSP, "location": "01", "date": ["2026-10-10", "2026-10-17"], "value": [21., 22.]})
     scored = score_quantiles(f, truth)
     summary = summarize(scored).set_index("model_id")
@@ -32,8 +33,12 @@ def test_skill_and_coverage_use_matched_denominators(forecast):
     assert summary.loc["MIGHTE-Base", "matched_n"] == 1
     assert summary.loc["MIGHTE-Base", "coverage_50"] == 1
     own = scored[scored.model_id.eq("MIGHTE-Base") & scored.horizon.eq(0)].wis.iloc[0]
-    baseline = scored[scored.model_id.eq(LOCAL_BASELINE)].wis.iloc[0]
+    baseline = scored[scored.model_id.eq("FluSight-baseline")].wis.iloc[0]
     assert summary.loc["MIGHTE-Base", "wis_skill"] == pytest.approx(1 - own / baseline)
+    missing = summarize(scored[scored.model_id.ne("FluSight-baseline")]).set_index("model_id")
+    assert missing.loc["MIGHTE-Base", "matched_n"] == 0
+    for metric in ["wis_skill", "reichlab_relative_wis", "cdc_relative_wis"]:
+        assert pd.isna(missing.loc["MIGHTE-Base", metric])
 
 
 def test_truth_revision_changes_scores_without_modifying_forecasts(forecast):
@@ -47,7 +52,7 @@ def test_truth_revision_changes_scores_without_modifying_forecasts(forecast):
 
 def test_zero_baseline_skill_is_undefined(forecast):
     f = pd.concat([forecast.assign(model_id="MIGHTE-Base", value=1),
-                   forecast.assign(model_id=LOCAL_BASELINE, value=0)])
+                   forecast.assign(model_id="FluSight-baseline", value=0)])
     truth = pd.DataFrame({"target": [HOSP], "location": ["01"], "date": ["2026-10-10"], "value": [0.]})
     summary = summarize(score_quantiles(f, truth)).set_index("model_id")
     assert pd.isna(summary.loc["MIGHTE-Base", "wis_skill"])

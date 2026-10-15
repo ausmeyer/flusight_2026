@@ -140,7 +140,8 @@ def test_pending_report_preserves_official_report_scores_and_model_colors(
     original = json.loads((normal.parent / "report-data.json").read_text())
     payload = json.loads((comparison.parent / "report-data.json").read_text())
     assert payload["scores"] == original["scores"]
-    assert payload["baseline_models"] == original["baseline_models"]
+    assert payload["comparison_baseline"] == original["comparison_baseline"] == "FluSight-baseline"
+    assert payload["trend_baseline"] == original["trend_baseline"] == "FluSight-baseline_cat"
     assert all("pending" not in row["model_id"] for row in payload["scores"])
     assert {row["model_id"] for row in payload["forecasts"]} == {
         "MIGHTE-Base", "UMass-flusion", "UMass-flusion (pending PR #3766)"}

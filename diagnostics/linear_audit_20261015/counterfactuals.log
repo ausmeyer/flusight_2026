@@ -1,0 +1,9 @@
+saved_model [4057.54 4048.61 3986.67 3871.19]
+frozen_coefficients_zero_horizon_level_contribution [4057.54 4380.39 4831.26 5252.63]
+frozen_coefficients_US_level_at_state_training_mean [5072.14 5483.88 6061.32 6604.09]
+refit_without_three_horizon_level_interactions [3686.87 3948.05 4289.76 4597.49]
+refit_location_centered_mean_level [4070.87 4403.28 4920.7  5412.74]
+refit_NHSN_origins_only_same_prepared_history [4073.1  3999.37 3924.99 3808.64]
+conditional_mean_update_unnormalized_weights_fixed_final_scale [4224.34 4213.77 4204.69 4136.31]
+frozen_coefficients_US_anchor_continues_prior_log_growth [4429.99 4416.4  4340.83 4200.25]
+Controlled counterfactuals complete. No production file changed.

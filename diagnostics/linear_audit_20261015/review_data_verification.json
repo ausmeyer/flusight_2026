@@ -1,0 +1,32 @@
+{
+  "truth_snapshot": "20261015T140534003646Z",
+  "truth_comparison_rows": 17119,
+  "truth_differing_rows": 0,
+  "forecast_comparisons": [
+    {
+      "quantile": 0.025,
+      "rows": 212,
+      "max_diff": 0.0
+    },
+    {
+      "quantile": 0.25,
+      "rows": 212,
+      "max_diff": 0.0
+    },
+    {
+      "quantile": 0.5,
+      "rows": 212,
+      "max_diff": 0.0
+    },
+    {
+      "quantile": 0.75,
+      "rows": 212,
+      "max_diff": 0.0
+    },
+    {
+      "quantile": 0.975,
+      "rows": 212,
+      "max_diff": 0.0
+    }
+  ]
+}

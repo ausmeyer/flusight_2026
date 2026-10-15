@@ -355,6 +355,49 @@ def test_registration_cancellation_makes_no_github_request(root, monkeypatch, ca
     assert "Registration cancelled" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("arguments", [[], ["--yes"], ["--run", "runs/selected"]])
+def test_submit_cli_validates_and_submits_without_keyboard_input(tmp_path, monkeypatch, capsys, arguments):
+    from mighte import cli
+
+    write_json(tmp_path / "runs/latest.json", {"run_id": "official_submissions/latest"})
+    run = Path("runs/selected") if "--run" in arguments else tmp_path / "runs/official_submissions/latest"
+    monkeypatch.setattr(cli, "project_root", lambda: tmp_path)
+    monkeypatch.setattr("sys.argv", ["mighte", "submit", *arguments])
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("Submit must not prompt for input"))
+    calls = []
+
+    def verify(project, selected, *, for_submission=False):
+        assert for_submission
+        calls.append(("validate", project, selected))
+        return {"reference_date": "2026-10-17", "models": ["MIGHTE-Base"], "notices": ["Fallback used"]}
+
+    monkeypatch.setattr(cli, "verify_run", verify)
+    monkeypatch.setattr(cli, "submit", lambda project, selected:
+                        calls.append(("submit", project, selected)) or "https://example.test/forecast-pr")
+    cli.main()
+    assert calls == [("validate", tmp_path, run), ("submit", tmp_path, run)]
+    output = capsys.readouterr().out
+    assert "MIGHTE-Base for 2026-10-17" in output
+    assert "Fallback used" in output and "https://example.test/forecast-pr" in output
+
+
+def test_submit_cli_stops_before_upload_when_validation_fails(tmp_path, monkeypatch, capsys):
+    from mighte import cli
+
+    monkeypatch.setattr(cli, "project_root", lambda: tmp_path)
+    monkeypatch.setattr("sys.argv", ["mighte", "submit", "--run", str(tmp_path)])
+
+    def reject(*args, **kwargs):
+        raise ValueError("Run is incomplete")
+
+    monkeypatch.setattr(cli, "verify_run", reject)
+    monkeypatch.setattr(cli, "submit", lambda *args: pytest.fail("Invalid runs must not be uploaded"))
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    assert "Run is incomplete" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("linear_designated", [False, True])
 def test_registration_includes_only_submission_models_and_enforces_two_designated(root, tmp_path, monkeypatch, linear_designated):
     from mighte import submit as submission

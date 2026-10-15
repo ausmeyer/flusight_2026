@@ -18,7 +18,7 @@ from .util import project_root
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MIGHTE weekly forecasts: forecast → review → submit")
+    parser = argparse.ArgumentParser(description="MIGHTE weekly forecasts: forecast → submit")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("refresh", help="Download complete current hub/CDC histories, including revisions")
     for command in ["forecast", "preview"]:
@@ -46,7 +46,7 @@ def main():
             p.add_argument("--include-pr", type=int, action="append", default=[], metavar="NUMBER",
                            help="Include an open hub PR in a local-only comparison (repeatable)")
         if command == "submit":
-            p.add_argument("--yes", action="store_true", help="Confirm that these exact files were reviewed")
+            p.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)
         if command == "publish":
             p.add_argument("--yes", action="store_true", help="Confirm publishing this reviewed dashboard and its forecast files to GitHub")
     p = sub.add_parser("register", help="Review and confirm the metadata-only registration/update PR")
@@ -117,11 +117,8 @@ def main():
             run = args.run or latest_run(root)
             manifest = verify_run(root, run, for_submission=True)
             models = manifest.get("models", list(MODELS))
-            print(f"Submit {', '.join(models)} for {manifest['reference_date']}?\nRun: {run}")
+            print(f"Submitting {', '.join(models)} for {manifest['reference_date']}\nRun: {run}")
             print_notices(manifest.get("notices", []))
-            if not args.yes and input("Type submit to open the CDC pull request: ").strip() != "submit":
-                print("Submission cancelled.")
-                return
             print(submit(root, run))
             return
         print(f"Review: {path}")

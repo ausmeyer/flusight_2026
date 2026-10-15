@@ -1,0 +1,11 @@
+term,coefficient,ridge
+scale_intercept,-0.7691098366827653,0.0
+panel_log_level_t,-0.04911971455222339,0.02
+panel_delta_log_week_1,0.05474384356015122,0.02
+panel_delta_roll_std_4,0.12483103287970793,0.02
+panel_nat_delta_std_week_1,0.029159714502001884,0.02
+scale_lead_2,0.1507253181899471,0.02
+scale_lead_3,0.29597669139694943,0.02
+scale_lead_4,0.40816185325577087,0.02
+scale_panel_target_is_flu,0.08500550311578216,0.02
+scale_panel_target_is_peak,0.13585584338797008,0.02
