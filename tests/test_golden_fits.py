@@ -1,4 +1,4 @@
-"""Fixtures were generated independently with the original study implementation."""
+"""Fixtures were generated independently with the frozen study implementations."""
 import json
 
 import numpy as np

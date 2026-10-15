@@ -1,6 +1,0 @@
-{
-  "raw_inverse_variance_weight_mean": 2.9450493915330176,
-  "fixed_penalty_NLL_mean_gradient_max_abs": 0.016066980338416505,
-  "normalized_weight_mean_gradient_max_abs": 2.1243976629919947e-11,
-  "interpretation": "The normalized weighted-ridge update is not the mean-coordinate minimizer of the same unnormalized Gaussian NLL plus the recorded fixed penalty."
-}

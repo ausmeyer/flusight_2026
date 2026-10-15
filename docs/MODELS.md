@@ -31,11 +31,11 @@ With `peak_timing` enabled, MIGHTE-Base includes a binary past-peak classifier a
 
 ## MIGHTE-Linear
 
-Direct partially pooled Gaussian autoregression of log1p changes. Shared features include origin log level; differences at 1, 2, 3, 4, 8, 12, 26, 52 weeks; rolling moments; cross-state hospitalization summaries; seasonal harmonics and regime indicators. The mean design includes location intercepts, horizon interactions and ridge-shrunk state deviations for current level and the two most recent differences. A linear log-scale model uses current level, absolute change, rolling spread, national spread, horizon and season indicators. Five coordinate iterations alternate penalized mean and scale fits, followed by a final scale fit. All penalties and iteration limits are preserved in `config/settings.json`. No June–August exclusion or new recalibration is introduced.
+Direct partially pooled Gaussian autoregression of log1p changes. Shared features include origin log level; differences at 1, 2, 3, 4, 8, 12, 26, 52 weeks; rolling moments; cross-state hospitalization summaries; seasonal harmonics and regime indicators. Before standardization, the mean design centers origin log level within each location using only eligible complete training rows at that forecast origin. Test rows use those same training centers. The mean design includes location intercepts, horizon interactions and ridge-shrunk state deviations for centered current level and the two most recent differences. A linear log-scale model retains the original uncentered current level, absolute change, rolling spread, national spread, horizon and season indicators; integration also retains the observed uncentered anchor level. Five coordinate iterations alternate penalized mean and scale fits, followed by a final scale fit. All penalties and iteration limits are preserved in `config/settings.json`. No June–August exclusion or new recalibration is introduced.
 
 ## MIGHTE-Nsemble
 
-At every location, horizon and quantile: `(WW-only + NSSP-only + Linear) / 3`. All three components must contain identical keys. This uses the internal unrounded quantiles; integer rounding occurs only on final hospitalization output. It does not include the combined-covariate Base model and never adapts weights from recent WIS.
+At every location, horizon and quantile: `(WW-only + NSSP-only + centered Linear) / 3`. The Linear component is the same fit used for the MIGHTE-Linear submission. All three components must contain identical keys. This uses the internal unrounded quantiles; integer rounding occurs only on final hospitalization output. It does not include the combined-covariate Base model and never adapts weights from recent WIS.
 
 ## Target conventions
 

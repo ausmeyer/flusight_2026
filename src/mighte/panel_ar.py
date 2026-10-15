@@ -255,7 +255,13 @@ def build_panel_ar_mean_design(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
     continuous = panel_ar_continuous_columns(runtime)
     binary = panel_ar_binary_columns()
-    train_scaled, test_scaled = _standardize_from_training(train, test, continuous)
+    # Fit location centers strictly from eligible rows in this training fold.
+    # Preserve original levels for scale prediction and count reconstruction.
+    level_centers = train.groupby("location_name")["panel_log_level_t"].mean()
+    train_features, test_features = train.copy(), test.copy()
+    train_features["panel_log_level_t"] -= train_features["location_name"].map(level_centers)
+    test_features["panel_log_level_t"] -= test_features["location_name"].map(level_centers)
+    train_scaled, test_scaled = _standardize_from_training(train_features, test_features, continuous)
     locations = sorted(set(train["location_name"].astype(str)) | set(test["location_name"].astype(str)))
     reference_location = locations[0]
 

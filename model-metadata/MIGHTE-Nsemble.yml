@@ -2,7 +2,7 @@ team_name: MIGHTE
 team_abbr: MIGHTE
 model_name: Fixed equal-weight time series ensemble
 model_abbr: Nsemble
-model_version: '3.0'
+model_version: '3.1'
 model_contributors:
 - name: Austin Meyer
   affiliation: Baylor College of Medicine
@@ -19,7 +19,8 @@ data_inputs: NHSN hospital admissions, national WastewaterSCAN influenza A, nati
 methods: Fixed equal-weight quantile ensemble of two-stage LightGBM bases and MIGHTE-Linear.
 methods_long: For 2026–27, fixed weights replace adaptive weighting. Components estimate predictive
   uncertainty and share information across locations without explicit spatial covariance.
-  Components include MIGHTE-Linear.
+  Components include the centered MIGHTE-Linear model, with location centers fitted only
+  from training observations. The three component weights remain equal.
 ensemble_of_models: true
 ensemble_of_hub_models: false
 backfill_adjustment: Models are refit weekly using the latest revised observations.

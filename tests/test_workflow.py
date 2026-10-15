@@ -80,6 +80,16 @@ def test_whole_offline_preview_and_submission_guard(root, tmp_path, monkeypatch,
     assert alabama.loc["2022-06-04":].notna().all()
     for model in ["MIGHTE-Linear", "MIGHTE-Nsemble"]:
         assert manifest["validation"][model]["targets"] == [HOSP]
+    # The standalone submission and fixed-third ensemble share the same unrounded Linear fit.
+    keys = UNIT + ["output_type", "output_type_id"]
+    linear = read_forecast(run / "components/linear.csv").set_index(keys).value.sort_index()
+    standalone = read_forecast(run / "model-output/MIGHTE-Linear/2026-10-10-MIGHTE-Linear.csv")
+    np.testing.assert_array_equal(standalone.set_index(keys).value.sort_index(), np.rint(linear))
+    components = [read_forecast(run / f"components/{name}.csv").set_index(keys).value.sort_index()
+                  for name in ["ww-hospitalizations", "nssp-hospitalizations"]]
+    ensemble = read_forecast(run / "model-output/MIGHTE-Nsemble/2026-10-10-MIGHTE-Nsemble.csv")
+    np.testing.assert_array_equal(ensemble.set_index(keys).value.sort_index(),
+                                  np.rint((components[0] + components[1] + linear) / 3))
     if with_ordinal:
         assert TREND in manifest["validation"]["MIGHTE-Base"]["targets"]
         probabilities = read_forecast(run / "components/base-ordinal.csv")

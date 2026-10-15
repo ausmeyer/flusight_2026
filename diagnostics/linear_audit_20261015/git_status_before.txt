@@ -1,9 +1,0 @@
- M README.md
- M src/mighte/cli.py
- M src/mighte/evaluate.py
- M src/mighte/report.py
- M tests/test_evaluation.py
- M tests/test_peak_height.py
- M tests/test_pr_review.py
- M tests/test_workflow.py
-?? diagnostics/
