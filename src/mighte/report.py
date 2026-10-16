@@ -160,7 +160,7 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 </details></div></div>
 <div class="timeline"><div class="week-navigation"><label for="week-slider">Browse forecast weeks</label><div class="week-slider">
 <button id="previous-week" type="button" aria-label="Previous forecast week">‹</button><input id="week-slider" type="range" min="0" step="1"><button id="next-week" type="button" aria-label="Next forecast week">›</button>
-</div></div><label>Ground-truth history<select id="history"><option value="recent">Recent</option><option value="year">Past year</option><option value="two_years">Past two years</option><option value="all">All available</option></select></label></div>
+</div></div><label>Ground-truth history<select id="history"><option value="recent">Year to date</option><option value="year" selected>Past year</option><option value="two_years">Past two years</option><option value="all">All available</option></select></label></div>
 <div id="chart"></div>
 </section>
 <section id="accuracy-card" class="card"><h2>Prospective accuracy to date</h2><div class="controls">
@@ -231,7 +231,7 @@ if(group!==selectionGroup){
 selections[selectionGroup]=selectedModels();
 const available=modelNames.filter(m=>allForecasts.some(r=>r.target===target&&r.model_id===m&&r.reference_date===ref&&r.location===loc));
 const defaults=target===PEAK_HEIGHT?modelNames.filter(m=>D.peak_height_forecasts.some(r=>r.model_id===m)):
-target===PEAK_WEEK?['FluSight-ensemble'].filter(m=>D.peak_week_forecasts.some(r=>r.model_id===m)):
+target===PEAK_WEEK?['MIGHTE-Base','FluSight-ensemble'].filter(m=>D.peak_week_forecasts.some(r=>r.model_id===m)):
 [D.default_models.find(m=>available.includes(m))||(available.includes('FluSight-ensemble')?'FluSight-ensemble':available[0])].filter(Boolean);
 const chosen=new Set(selections[group]||defaults);
 el('models').querySelectorAll('input').forEach(input=>input.checked=chosen.has(input.value));selectionGroup=group;
