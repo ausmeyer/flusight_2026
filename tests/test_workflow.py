@@ -423,6 +423,7 @@ def test_registration_includes_only_submission_models_and_enforces_two_designate
     calls = []
 
     def capture_pr(project, files, **kwargs):
+        assert kwargs["branch"] == "main"
         calls.append(files)
         return "reviewed-metadata-pr"
 

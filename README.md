@@ -31,7 +31,7 @@ With the GitHub CLI (`gh`) installed and signed in, the weekly submission is:
 ./mighte submit
 ```
 
-`submit` validates the latest production run and creates or updates the hub PR with the reference date and model names, without an extra confirmation prompt. To submit only after forecasting succeeds, use `./mighte forecast && ./mighte submit`.
+`submit` validates the latest production run and creates or updates the hub PR from your account's `main` branch in its `FluSight-forecast-hub` fork, with the reference date and model names and without an extra confirmation prompt. To submit only after forecasting succeeds, use `./mighte forecast && ./mighte submit`.
 
 To reopen the latest report:
 
