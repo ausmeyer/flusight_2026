@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from .pipeline import verify_run
 from .submit import gh_json
@@ -17,6 +19,42 @@ BRANCH = "dashboard"
 ARCHIVE = "forecasts"
 SITE_FILES = {"index.html", "publication.json", ".nojekyll"}
 GENERATOR = "mighte-pages-v1"
+
+
+def _push_dashboard(root: Path, repo: str, html: bytes, publication: dict, head: str | None) -> str:
+    """Transfer the reviewed files with Git compression instead of a large JSON API upload."""
+    user = gh_json(["api", "user"])
+    email = subprocess.run(["git", "-C", str(root), "config", "user.email"],
+                           capture_output=True, text=True, check=False).stdout.strip()
+    email = email or f"{user['id']}+{user['login']}@users.noreply.github.com"
+    url = f"https://github.com/{repo}.git"
+    with TemporaryDirectory(prefix="mighte-pages-") as directory:
+        def git(*arguments, content=None):
+            result = subprocess.run(["git", "-C", directory,
+                "-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential",
+                "-c", f"user.name={user.get('name') or user['login']}", "-c", f"user.email={email}",
+                *arguments], input=content, capture_output=True, check=False,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+            if result.returncode:
+                raise RuntimeError(f"GitHub dashboard transfer failed: {result.stderr.decode(errors='replace').strip()}")
+            return result.stdout.decode().strip()
+
+        git("init", "--bare", "--quiet")
+        if head:
+            git("fetch", "--quiet", "--no-tags", "--depth=1", url, f"refs/heads/{BRANCH}")
+            if git("rev-parse", "FETCH_HEAD") != head:
+                raise ValueError("Dashboard branch changed during publication; run publish again")
+        files = {"index.html": html, ".nojekyll": b"",
+                 "publication.json": (json.dumps(publication, indent=2) + "\n").encode()}
+        entries = []
+        for name, content in sorted(files.items()):
+            blob = git("hash-object", "-w", "--stdin", content=content)
+            entries.append(f"100644 blob {blob}\t{name}\n")
+        tree = git("mktree", content="".join(entries).encode())
+        commit = git("commit-tree", tree, *(["-p", head] if head else []),
+                     content=f"Publish reviewed dashboard for {publication['reference_date']}\n".encode())
+        git("push", "--quiet", url, f"{commit}:refs/heads/{BRANCH}")
+        return commit
 
 
 def repository(root: Path) -> str:
@@ -83,21 +121,7 @@ def publish_report(root: Path, repo: str, html: bytes, metadata: dict) -> dict:
         if json.loads(base64.b64decode(previous["content"])).get("generator") != GENERATOR:
             raise ValueError("Existing dashboard branch was not created by MIGHTE publishing")
     publication = {**metadata, "published_at": utc_now()}
-    blob = gh_json(["api", f"{api}/git/blobs", "--method", "POST"],
-                   {"content": base64.b64encode(html).decode(), "encoding": "base64"})
-    tree = gh_json(["api", f"{api}/git/trees", "--method", "POST"], {"tree": [
-        {"path": "index.html", "mode": "100644", "type": "blob", "sha": blob["sha"]},
-        {"path": "publication.json", "mode": "100644", "type": "blob", "content": json.dumps(publication, indent=2) + "\n"},
-        {"path": ".nojekyll", "mode": "100644", "type": "blob", "content": ""}]})
-    commit = gh_json(["api", f"{api}/git/commits", "--method", "POST"],
-                     {"message": f"Publish reviewed dashboard for {metadata['reference_date']}",
-                      "tree": tree["sha"], "parents": [head] if head else []})["sha"]
-    if head:
-        gh_json(["api", f"{api}/git/refs/heads/{BRANCH}", "--method", "PATCH"],
-                 {"sha": commit, "force": False})
-    else:
-        gh_json(["api", f"{api}/git/refs", "--method", "POST"],
-                 {"ref": f"refs/heads/{BRANCH}", "sha": commit})
+    commit = _push_dashboard(root, repo, html, publication, head)
     gh_json(["api", f"{api}/actions/workflows/pages.yml/dispatches", "--method", "POST"],
              {"ref": info["default_branch"], "inputs": {"dashboard_commit": commit}})
     receipt = {**publication, "commit": commit, "repository": repo, "status": "requested",

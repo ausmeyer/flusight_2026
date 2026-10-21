@@ -108,29 +108,24 @@ def test_publish_uploads_only_report_and_dispatches_exact_commit(reviewed, monke
             return {"tree": [{"path": name} for name in publish.SITE_FILES]}
         if "/contents/publication.json?" in endpoint:
             return {"content": base64.b64encode(json.dumps({"generator": publish.GENERATOR}).encode()).decode()}
-        if endpoint.endswith("/git/blobs"):
-            assert base64.b64decode(payload["content"]) == html
-            return {"sha": "report-blob"}
-        if endpoint.endswith("/git/trees"):
-            assert {item["path"] for item in payload["tree"]} == publish.SITE_FILES
-            return {"sha": "site-tree"}
-        if endpoint.endswith("/git/commits"):
-            assert payload["parents"] == (["previous-commit"] if existing else [])
-            return {"sha": "reviewed-commit"}
         if endpoint.endswith("/dispatches"):
             assert payload == {"ref": "main", "inputs": {"dashboard_commit": "reviewed-commit"}}
             return None
-        if "/git/refs" in endpoint:
-            assert payload["sha"] == "reviewed-commit"
-            if existing:
-                assert payload["force"] is False
-            else:
-                assert payload["ref"] == "refs/heads/dashboard"
-            return None
         pytest.fail(f"Unexpected endpoint: {endpoint}")
 
+    uploads = []
+
+    def upload(actual_root, repo, content, publication, head):
+        assert actual_root == root and repo == "owner/flusight_2026" and content == html
+        assert publication["report_sha256"] == metadata["report_sha256"]
+        assert head == ("previous-commit" if existing else None)
+        uploads.append(publication)
+        return "reviewed-commit"
+
     monkeypatch.setattr(publish, "gh_json", github)
+    monkeypatch.setattr(publish, "_push_dashboard", upload)
     receipt = publish.publish_report(root, "owner/flusight_2026", html, metadata)
+    assert len(uploads) == 1
     assert receipt["status"] == "requested" and receipt["commit"] == "reviewed-commit"
     assert json.loads((root / ".runtime/pages-publication.json").read_text()) == receipt
     assert calls[-1][0][1].endswith("/dispatches")
