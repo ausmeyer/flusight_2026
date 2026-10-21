@@ -1,0 +1,159 @@
+{
+  "baseline_sha256": "ddd16a601350b9f4d92966de7c96d4e609d6074737cb0a6161d05d3bcf68ff8b",
+  "code_sha256": "c621ef25588e315c5434c6be0b38cda5c120ad15de594c16cb50603a74b9274c",
+  "completed_at": "2026-10-21T19:08:18.677987+00:00",
+  "created_at": "2026-10-21T17:18:12.225887+00:00",
+  "environment": {
+    "lightgbm": "4.2.0",
+    "numpy": "1.26.3",
+    "pandas": "2.1.4",
+    "python": "3.11.13",
+    "scipy": "1.11.4"
+  },
+  "historical_input_hashes": {
+    "data/historical/hospitalization_calibration.csv": "3bc3f5616c9831c72b5bc0f0e6b947ee9b0bd9817321e4cba3c9064c25021395",
+    "data/historical/hospitalization_proxy.csv": "7154276e744ea5b0ff08a74f6d25835b45150e39f58bef78541b186d0c025abd",
+    "data/historical/ilinet_normalized.csv": "037d7f78db4e28d90efed29cbfc2c01640b285cbe78f906c370c78e193400ac3"
+  },
+  "models": [
+    "MIGHTE-Base",
+    "MIGHTE-Linear",
+    "MIGHTE-Nsemble"
+  ],
+  "notices": [
+    "Delaware ED: using older data (last reported 2026-10-10), without wastewater.",
+    "Georgia ED: using older data (last reported 2026-10-10), without wastewater.",
+    "Iowa ED: using older data (last reported 2026-06-27), without wastewater."
+  ],
+  "output_hashes": {
+    "model-output/MIGHTE-Base/2026-10-24-MIGHTE-Base.csv": "f6a04d84f21490aeeeefd4084406bcf8b12d1a4a9a2d0fec89e94e45b5f817dd",
+    "model-output/MIGHTE-Linear/2026-10-24-MIGHTE-Linear.csv": "f6931eb9af4a47a0c9c4db9befdfc305d8d2389bf10befc5058bc88730f3fe66",
+    "model-output/MIGHTE-Nsemble/2026-10-24-MIGHTE-Nsemble.csv": "2e921092ab336ea282724d2c607bef8531e252ad7372bd1a386541d4b6e20ecb"
+  },
+  "preview": false,
+  "quick": false,
+  "reference_date": "2026-10-24",
+  "run_id": "official_submissions/2026-10-24/20261021T171812225226Z",
+  "settings": {
+    "component_workers": 2,
+    "ed_history": {
+      "mode": "ilinet_proxy"
+    },
+    "ed_target_transform": {
+      "boundary_epsilon": 5e-05,
+      "name": "logit"
+    },
+    "ordinal_plugin": "mighte.ordinal:predict",
+    "panel_ar_runtime": {
+      "anchor_step_weeks": 1,
+      "ar_weeks": [
+        1,
+        2,
+        3,
+        4,
+        8,
+        12,
+        26,
+        52
+      ],
+      "horizon_interaction_ridge": 0.02,
+      "joint_iterations": 5,
+      "location_intercept_ridge": 0.02,
+      "max_horizons": 4,
+      "mean_ridge": 0.01,
+      "min_train_rows": 1000,
+      "note": "MIGHTE-Linear directly predicts log1p(y[t+h])-log1p(y[t]) from features ending at t. The latest one-week difference is log1p(y[t])-log1p(y[t-1]), and integration begins from y[t] only.",
+      "partial_slope_ridge": 0.2,
+      "rolling_windows": [
+        2,
+        4,
+        8,
+        12
+      ],
+      "scale_max_iterations": 100,
+      "scale_ridge": 0.02
+    },
+    "peak_height": true,
+    "peak_timing": true,
+    "runtime": {
+      "anchor_step_weeks": 1,
+      "bag_frac": 0.8,
+      "donor_lags": [
+        1,
+        2,
+        3,
+        4,
+        8,
+        12,
+        52
+      ],
+      "donor_min_overlap": 40,
+      "donor_top_k": 5,
+      "max_horizons": 4,
+      "min_train_rows": 1000,
+      "num_bags": 100,
+      "num_threads": 4,
+      "own_lags": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        8,
+        12,
+        26,
+        52
+      ],
+      "stage1_rounds": 250,
+      "stage2_rounds": 120
+    },
+    "season": "2026-2027",
+    "seed": 20360429,
+    "threads": 4
+  },
+  "settings_sha256": "5880a20fc9d9cfcb0c60c7f4e7ccf5f609044713ac9e1d7be68a23c06f9b9597",
+  "snapshot_id": "20261021T171758042121Z",
+  "snapshot_manifest_sha256": "28c1b5af90a68784b257caaf07a04c014aec224e76903a052c84608eaec443bd",
+  "status": "complete",
+  "validation": {
+    "MIGHTE-Base": {
+      "locations": {
+        "peak inc flu hosp": 53,
+        "peak week inc flu hosp": 53,
+        "wk flu hosp rate change": 53,
+        "wk inc flu hosp": 53,
+        "wk inc flu prop ed visits": 52
+      },
+      "rows": 13741,
+      "targets": [
+        "peak inc flu hosp",
+        "peak week inc flu hosp",
+        "wk flu hosp rate change",
+        "wk inc flu hosp",
+        "wk inc flu prop ed visits"
+      ],
+      "valid": true
+    },
+    "MIGHTE-Linear": {
+      "locations": {
+        "wk inc flu hosp": 53
+      },
+      "rows": 4876,
+      "targets": [
+        "wk inc flu hosp"
+      ],
+      "valid": true
+    },
+    "MIGHTE-Nsemble": {
+      "locations": {
+        "wk inc flu hosp": 53
+      },
+      "rows": 4876,
+      "targets": [
+        "wk inc flu hosp"
+      ],
+      "valid": true
+    }
+  }
+}
