@@ -3894,6 +3894,7 @@ background:white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 .model-control{font-size:12px;font-weight:650;display:flex;flex-direction:column;gap:7px}.model-picker{position:relative;margin:0;min-width:190px}
 .model-picker summary{border:1px solid #c5d2d9;border-radius:6px;padding:8px 12px;background:white;color:#213f50;font-size:12px}
 .model-panel{position:absolute;z-index:20;right:0;top:calc(100% + 7px);width:min(320px,calc(100vw - 48px));box-sizing:border-box;background:white;border:1px solid #c5d2d9;border-radius:8px;padding:12px;box-shadow:0 8px 24px #19333e24}
+#accuracy-model-picker .model-panel{left:0;right:auto}
 .model-search{box-sizing:border-box;width:100%;padding:8px;border:1px solid #c5d2d9;border-radius:5px;font:inherit}.model-actions{display:flex;gap:8px;margin:10px 0}
 .model-actions button{font:inherit;color:#216b75;border:1px solid #c5d2d9;border-radius:5px;background:white;padding:5px 9px;cursor:pointer}
 .checks{max-height:270px;overflow-y:auto}.checks label{display:flex;flex-direction:row;align-items:center;font-weight:500;padding:7px 0;gap:8px}.checks label[hidden]{display:none}.checks label:has(input:disabled){opacity:.45}.checks input{accent-color:#167f87;margin:0}.swatch{width:10px;height:10px;border-radius:50%;flex-shrink:0}
@@ -3913,10 +3914,10 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 <section class="card"><h2>Prospective forecasts</h2><div class="controls">
 <label>Reference week<select id="reference"></select></label><label>Target<select id="target"><option value="wk inc flu hosp">Hospital admissions</option><option value="wk inc flu prop ed visits">ED visits</option><option value="wk flu hosp rate change">Hospitalization trend</option><option value="peak week inc flu hosp">Peak timing</option><option value="peak inc flu hosp">Peak height</option></select></label>
 <label>Location<select id="location"></select></label>
-<div class="model-control"><span>Models</span><details id="model-picker" class="model-picker"><summary id="model-summary" aria-label="Models">1 selected</summary>
-<div class="model-panel"><input id="model-search" class="model-search" type="search" aria-label="Search models" placeholder="Search models">
-<div class="model-actions"><button id="select-all" type="button">Select all</button><button id="clear-models" type="button">Clear</button></div>
-<div id="models" class="checks" role="group" aria-label="Forecast models"></div><div id="no-model-matches" hidden>No matching models.</div></div>
+<div class="model-control"><span>Models</span><details id="model-picker" class="model-picker"><summary aria-label="Forecast models">1 selected</summary>
+<div class="model-panel"><input class="model-search" type="search" aria-label="Search forecast models" placeholder="Search models">
+<div class="model-actions"><button data-select-all type="button">Select all</button><button data-clear type="button">Clear</button></div>
+<div id="models" class="checks" role="group" aria-label="Forecast models"></div><div class="no-model-matches" hidden>No matching models.</div></div>
 </details></div></div>
 <div class="timeline"><div class="week-navigation"><label for="week-slider">Browse forecast weeks</label><div class="week-slider">
 <button id="previous-week" type="button" aria-label="Previous forecast week">‹</button><input id="week-slider" type="range" min="0" step="1"><button id="next-week" type="button" aria-label="Next forecast week">›</button>
@@ -3924,6 +3925,11 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 <div id="chart"></div><p id="chart-note" class="chart-note"></p>
 </section>
 <section id="accuracy-card" class="card"><h2>Prospective accuracy to date</h2><div class="controls">
+<div class="model-control"><span>Models</span><details id="accuracy-model-picker" class="model-picker"><summary aria-label="Accuracy models">0 selected</summary>
+<div class="model-panel"><input class="model-search" type="search" aria-label="Search accuracy models" placeholder="Search models">
+<div class="model-actions"><button data-select-all type="button">Select all</button><button data-clear type="button">Clear</button></div>
+<div id="accuracy-models" class="checks" role="group" aria-label="Accuracy models"></div><div class="no-model-matches" hidden>No matching models.</div></div>
+</details></div>
 <div class="model-control"><span>Comparison baseline</span><strong id="baseline"></strong></div>
 <label>Scoring locations<select id="scope"><option value="states">States + DC</option><option value="states_pr">States + DC + Puerto Rico</option><option value="US">United States</option><option value="all">All (includes national)</option><option value="selected">Selected location above</option></select></label>
 <label>Horizon<select id="horizon"><option value="all">All horizons</option><option value="0">0 · nowcast</option><option value="1">1 week ahead</option><option value="2">2 weeks ahead</option><option value="3">3 weeks ahead</option></select></label>
@@ -3944,8 +3950,15 @@ options('location',D.locations.filter(x=>allForecasts.some(r=>r.location===x.loc
 const modelNames=[...new Set([...allForecasts.map(r=>r.model_id),...D.comparison_models])].sort();
 const colors=D.model_colors;
 const opening=openingModel(D.default_models,D.forecasts,{target:el('target').value,reference:el('reference').value,location:el('location').value})||D.default_models.find(m=>modelNames.includes(m));
-el('models').innerHTML=modelNames.map(m=>`<label><input type="checkbox" value="${esc(m)}" ${m===opening?'checked':''}><span class="swatch" aria-hidden="true" style="background:${colors[m]}"></span>${esc(m)}</label>`).join('');
-const selectedModels=()=>[...el('models').querySelectorAll('input:checked')].map(x=>x.value);
+const modelOptions=(names,checked)=>names.map(m=>`<label><input type="checkbox" value="${esc(m)}" ${checked.has(m)?'checked':''}><span class="swatch" aria-hidden="true" style="background:${colors[m]||'#658091'}"></span>${esc(m)}</label>`).join('');
+el('models').innerHTML=modelOptions(modelNames,new Set([opening]));
+const scoredModels=new Set(D.scores.map(r=>r.model_id));
+el('accuracy-models').innerHTML=modelOptions([...scoredModels].sort(),scoredModels);
+const selectedModels=id=>[...el(id).querySelectorAll('input:checked')].map(x=>x.value);
+function updateModelSummary(id,list){const summary=el(id).querySelector('summary');
+const count=el(list).querySelectorAll('input:checked:not(:disabled)').length;
+summary.textContent=`${count} selected`;summary.setAttribute('aria-label',`${el(list).getAttribute('aria-label')}: ${count} selected`);
+}
 let selectionGroup='weekly';const selections={};
 const rgba=(hex,a)=>`rgba(${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)},${a})`;
 const shiftDate=(date,days)=>new Date(Date.parse(date)+days*86400000).toISOString().slice(0,10);
@@ -4032,7 +4045,7 @@ Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false}).then(()=
 function plot(){const ref=el('reference').value,target=el('target').value,loc=el('location').value,mult=target.includes('prop')?100:1;
 const peak=[PEAK_WEEK,PEAK_HEIGHT].includes(target),group=peak?target:'weekly';
 if(group!==selectionGroup){
-selections[selectionGroup]=selectedModels();
+selections[selectionGroup]=selectedModels('models');
 const available=modelNames.filter(m=>allForecasts.some(r=>r.target===target&&r.model_id===m&&r.reference_date===ref&&r.location===loc));
 const defaults=target===PEAK_HEIGHT?modelNames.filter(m=>D.peak_height_forecasts.some(r=>r.model_id===m)):
 target===PEAK_WEEK?['MIGHTE-Base','FluSight-ensemble'].filter(m=>D.peak_week_forecasts.some(r=>r.model_id===m)):
@@ -4043,16 +4056,13 @@ el('models').querySelectorAll('input').forEach(input=>input.checked=chosen.has(i
 const index=references.indexOf(ref);el('week-slider').value=index;el('week-slider').setAttribute('aria-valuetext',ref);
 el('previous-week').disabled=index<=0;el('next-week').disabled=index>=references.length-1;
 el('models').querySelectorAll('input').forEach(input=>{input.disabled=!allForecasts.some(r=>r.target===target&&r.model_id===input.value)});
-const selectedCount=el('models').querySelectorAll('input:checked:not(:disabled)').length;
-el('model-summary').textContent=`${selectedCount} selected`;el('model-summary').setAttribute('aria-label',`Models: ${selectedCount} selected`);
-const traces=[],chosen=selectedModels();
-el('baseline').textContent=target===TREND?D.trend_baseline:D.comparison_baseline;
+updateModelSummary('model-picker','models');
+const traces=[],chosen=selectedModels('models');
 el('history').parentElement.hidden=target===TREND||peak;
-el('accuracy-card').hidden=peak;
 const shading='central prediction intervals from 10% to 90% in steps of 10, plus 95%; darker is narrower.';
 el('chart-note').textContent=target===TREND?'':peak?`Each ridge is one model's forecast, sorted by median with the ${target===PEAK_WEEK?'earliest':'lowest'} at the top. Shading marks ${shading}${target===PEAK_HEIGHT?' Curves are smoothed from the submitted quantiles.':''}`:`Bands are ${shading}`;
 if(peak){peakPlot(ref,loc,target,chosen);return;}
-if(target===TREND){probabilityPlot(ref,loc,chosen);table();return;}
+if(target===TREND){probabilityPlot(ref,loc,chosen);return;}
 el('chart').style.height='';
 const observed=D.truth.filter(r=>r.target===target&&r.location===loc&&r.value!==null).sort((a,b)=>a.date.localeCompare(b.date));
 const latest=references[references.length-1],history=el('history').value;
@@ -4077,7 +4087,7 @@ traces.push({x,y:rows.map(r=>r.q[MID]*mult),mode:'lines+markers',name:model,lege
 const weeks=Object.keys(hover).sort();
 traces.push({x:weeks,y:weeks.map(()=>0),text:weeks.map(d=>hover[d].join('<br>')),mode:'markers',marker:{opacity:0},showlegend:false,hovertemplate:'%{text}<extra></extra>'});
 Plotly.react('chart',traces,{hoverdistance:-1,margin:{t:25,b:45,l:65,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},uirevision:[target,loc,history,...chosen].join('|'),xaxis:{type:'date',range:[begin,end],gridcolor:'#edf1f3',hoverformat:'%b %-d, %Y'},yaxis:{title:{text:mult===100?'Influenza ED visits (%)':'Hospital admissions'},range:[0,ymax*1.08],gridcolor:'#edf1f3'},legend:{orientation:'h',y:1.14,maxheight:.25},hovermode:'x unified',shapes:[{type:'line',x0:ref,x1:ref,y0:0,y1:1,yref:'paper',line:{color:'#95a7ae',dash:'dot',width:1}}]},{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
-table();}
+}
 const mean=rows=>rows.length?rows.reduce((a,b)=>a+b,0)/rows.length:null;
 const geom=arr=>arr.length?(arr.includes(0)?0:Math.exp(mean(arr.map(Math.log)))):null;
 const key=r=>[r.reference_date,r.target,r.horizon,r.target_end_date,r.location].join('|');
@@ -4093,14 +4103,20 @@ const head=headers.map((label,i)=>`<th scope="col" aria-sort="${i===column?(accu
 const body=rows.map(row=>'<tr>'+row.map((value,i)=>`<td class="${skillColumns.includes(i)&&Number.isFinite(value)?(value>=0?'positive':'negative'):''}">${formatCell(value,i)}</td>`).join('')+'</tr>').join('');
 el('accuracy').innerHTML='<table><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table>';
 }
-function table(){let rows=D.scores.filter(r=>r.target===el('target').value);const scope=el('scope').value,h=el('horizon').value,base=el('target').value===TREND?D.trend_baseline:D.comparison_baseline,digits=el('target').value.includes('prop')?6:3;
+function table(){const target=el('target').value,card=el('accuracy-card');
+card.hidden=target===PEAK_WEEK||target===PEAK_HEIGHT;if(card.hidden)return;
+let rows=D.scores.filter(r=>r.target===target);const scope=el('scope').value,h=el('horizon').value,base=target===TREND?D.trend_baseline:D.comparison_baseline,digits=target.includes('prop')?6:3;
+el('baseline').textContent=base;
 rows=rows.filter(r=>(scope==='all'||(scope==='states'?!['US','72'].includes(r.location):scope==='states_pr'?r.location!=='US':r.location===(scope==='selected'?el('location').value:scope)))&&(h==='all'||r.horizon===Number(h)));
+const available=new Set(rows.map(r=>r.model_id));
+el('accuracy-models').querySelectorAll('input').forEach(input=>input.disabled=!available.has(input.value));
+updateModelSummary('accuracy-model-picker','accuracy-models');
 if(!rows.length){el('accuracy').innerHTML='<div class="empty">No scored prospective forecasts yet.</div>';return;}
-const names=[...new Set(rows.map(r=>r.model_id))].sort(),groups=Object.fromEntries(names.map(m=>[m,rows.filter(r=>r.model_id===m)])),maps=Object.fromEntries(names.map(m=>[m,new Map(groups[m].map(r=>[key(r),r]))]));
-const selected=new Set(selectedModels()),visible=names.filter(m=>selected.has(m));
+const names=[...available].sort(),groups=Object.fromEntries(names.map(m=>[m,rows.filter(r=>r.model_id===m)])),maps=Object.fromEntries(names.map(m=>[m,new Map(groups[m].map(r=>[key(r),r]))]));
+const selected=new Set(selectedModels('accuracy-models')),visible=names.filter(m=>selected.has(m));
 if(!visible.length){el('accuracy').innerHTML='<div class="empty">No selected models have scored forecasts.</div>';return;}
 const theta=metric=>Object.fromEntries(names.map(m=>[m,geom(names.map(n=>{let a=0,b=0,count=0;groups[m].forEach(r=>{const other=maps[n].get(key(r));if(other){a+=r[metric];b+=other[metric];count++}});return count&&b>0?a/b:NaN}))]));
-if(el('target').value===TREND){
+if(target===TREND){
 const data=visible.map(m=>{const g=groups[m],bm=maps[base]||new Map();let a=0,b=0,n=0;g.forEach(r=>{const br=bm.get(key(r));if(br){a+=r.rps;b+=br.rps;n++}});const skill=n&&b>0?1-a/b:null;
 return [m,g.length,n,mean(g.map(r=>r.rps)),skill,mean(g.map(r=>r.brier)),mean(g.map(r=>r.log_score)),mean(g.map(r=>r.accuracy)),mean(g.map(r=>r.absolute_category_error)),mean(g.map(r=>r.zero_observed_probability))];});
 renderAccuracy(['Model','N','Matched','RPS','RPS skill','Brier','Log score','Category accuracy','Category error','Zero-probability outcomes'],data,(value,i)=>i===0?esc(value):[4,7,9].includes(i)?pct(value):fmt(value),[4]);return;}
@@ -4108,18 +4124,23 @@ const tr=theta('wis'),tl=theta('wis_log1p'),ta=theta('ae');
 const data=visible.map(m=>{const g=groups[m],bm=maps[base]||new Map();let a=0,b=0,ma=0,mb=0,n=0;g.forEach(r=>{const br=bm.get(key(r));if(br){a+=r.wis;b+=br.wis;ma+=r.ae;mb+=br.ae;n++}});const skill=n&&b>0?1-a/b:null,maeSkill=n&&mb>0?1-ma/mb:null;
 return [m,g.length,n,mean(g.map(r=>r.ae)),ta[base]>0?ta[m]/ta[base]:null,maeSkill,mean(g.map(r=>r.wis)),tr[base]>0?tr[m]/tr[base]:null,tl[base]>0?tl[m]/tl[base]:null,skill,mean(g.map(r=>r.coverage_50)),mean(g.map(r=>r.coverage_80)),mean(g.map(r=>r.coverage_95))];});
 renderAccuracy(['Model','N','Matched','MAE','Rel MAE','MAE Skill','Mean WIS','Rel WIS','Rel log-WIS','WIS Skill','50% coverage','80% coverage','95% coverage'],data,(value,i)=>i===0?esc(value):i===5||i>=9?pct(value):fmt(value,[3,6].includes(i)?digits:3),[5,9]);}
-['reference','target','location','history'].forEach(id=>el(id).addEventListener('change',plot));el('models').addEventListener('change',plot);
+['reference','target','location','history'].forEach(id=>el(id).addEventListener('change',plot));
 function browseWeek(index){el('reference').value=references[Math.max(0,Math.min(references.length-1,index))];plot()}
 el('week-slider').addEventListener('input',()=>browseWeek(Number(el('week-slider').value)));
 el('previous-week').addEventListener('click',()=>browseWeek(references.indexOf(el('reference').value)-1));
 el('next-week').addEventListener('click',()=>browseWeek(references.indexOf(el('reference').value)+1));
 el('week-slider').addEventListener('wheel',event=>{const delta=event.deltaX||event.deltaY;if(!delta||el('week-slider').disabled)return;event.preventDefault();const now=performance.now();if(now-(el('week-slider').lastWheel||0)<150)return;el('week-slider').lastWheel=now;browseWeek(references.indexOf(el('reference').value)+(delta>0?1:-1))},{passive:false});
-el('model-search').addEventListener('input',()=>{const query=el('model-search').value.toLowerCase();let count=0;el('models').querySelectorAll('label').forEach(label=>{label.hidden=!label.textContent.toLowerCase().includes(query);if(!label.hidden)count++});el('no-model-matches').hidden=count>0});
-el('select-all').addEventListener('click',()=>{el('models').querySelectorAll('input:not(:disabled)').forEach(input=>input.checked=true);plot()});
-el('clear-models').addEventListener('click',()=>{el('models').querySelectorAll('input').forEach(input=>input.checked=false);plot()});
-document.addEventListener('click',event=>{if(!el('model-picker').contains(event.target))el('model-picker').open=false});
-el('model-picker').addEventListener('keydown',event=>{if(event.key==='Escape'){el('model-picker').open=false;el('model-summary').focus()}});
+function bindModelPicker(id,listId,onChange){const picker=el(id),list=el(listId),search=picker.querySelector('.model-search');
+list.addEventListener('change',onChange);
+search.addEventListener('input',()=>{const query=search.value.toLowerCase();let count=0;list.querySelectorAll('label').forEach(label=>{label.hidden=!label.textContent.toLowerCase().includes(query);if(!label.hidden)count++});picker.querySelector('.no-model-matches').hidden=count>0});
+picker.querySelector('[data-select-all]').addEventListener('click',()=>{list.querySelectorAll('input:not(:disabled)').forEach(input=>input.checked=true);onChange()});
+picker.querySelector('[data-clear]').addEventListener('click',()=>{list.querySelectorAll('input').forEach(input=>input.checked=false);onChange()});
+document.addEventListener('click',event=>{if(!picker.contains(event.target))picker.open=false});
+picker.addEventListener('keydown',event=>{if(event.key==='Escape'){picker.open=false;picker.querySelector('summary').focus()}});
+}
+bindModelPicker('model-picker','models',plot);
+bindModelPicker('accuracy-model-picker','accuracy-models',table);
 el('accuracy').addEventListener('click',event=>{const button=event.target.closest('button[data-sort]');if(!button)return;const label=button.dataset.sort;accuracySort={label,direction:accuracySort.label===label?-accuracySort.direction:1};table();
 [...el('accuracy').querySelectorAll('button[data-sort]')].find(button=>button.dataset.sort===label)?.focus()});
-['scope','horizon'].forEach(id=>el(id).addEventListener('change',table));plot();
+['target','location','scope','horizon'].forEach(id=>el(id).addEventListener('change',table));plot();table();
 </script></body></html>
