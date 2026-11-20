@@ -21,7 +21,7 @@ const input=JSON.parse(require('fs').readFileSync(0,'utf8'));
 const D={scores:input.scores,comparison_baseline:'FluSight-baseline',trend_baseline:'FluSight-baseline_cat'};
 const TREND='wk flu hosp rate change',PEAK_WEEK='peak week inc flu hosp',PEAK_HEIGHT='peak inc flu hosp';
 const inputs=[...new Set(D.scores.map(r=>r.model_id))].map(value=>({value,checked:input.models===null||input.models.includes(value)}));
-const controls={target:{value:input.target},scope:{value:'states'},horizon:{value:input.horizon},accuracy:{},location:{value:'01'},baseline:{},'accuracy-card':{},
+const controls={target:{value:input.target},scope:{value:'states'},horizon:{value:input.horizon},accuracy:{},location:{value:'01'},'accuracy-card':{},
 models:{querySelectorAll:()=>[{value:'Other',checked:true}]},
 'accuracy-models':{getAttribute:()=> 'Accuracy models',querySelectorAll:selector=>inputs.filter(box=>
     (!selector.includes(':checked')||box.checked)&&(!selector.includes(':disabled')||!box.disabled))},
@@ -80,6 +80,19 @@ def test_accuracy_selection_filters_rows_without_changing_baseline_comparisons()
     _, selected_rows, _ = render(scores, models=["MIGHTE-Base"])
     assert selected_rows == [row for row in all_rows if row[0][1] == "MIGHTE-Base"]
     assert selected_rows[0][5] == ("positive", "50.0%")
+
+
+def test_dashboard_scores_models_that_only_overlap_via_the_baseline():
+    scores = [{**weekly_scores()[0], "model_id": model, "horizon": horizon,
+               "target_end_date": ["2026-10-10", "2026-10-17"][horizon],
+               "ae": error, "wis": error, "wis_log1p": error / 10}
+              for model, horizon, error in [("Early", 0, 2), ("Late", 1, 8),
+                                            ("FluSight-baseline", 0, 4), ("FluSight-baseline", 1, 4)]]
+    headers, rows, _ = render(scores)
+    for column in ["Rel MAE", "Rel WIS", "Rel log-WIS"]:
+        assert {row[0][1]: row[headers.index(column)][1] for row in rows} == {
+            "Early": "0.707", "Late": "1.414", "FluSight-baseline": "1"}
+    assert "Comparison baseline" not in TEMPLATE
 
 
 def test_trend_table_retains_categorical_metrics_and_skill_color():

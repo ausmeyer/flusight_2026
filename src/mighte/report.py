@@ -179,7 +179,6 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 <div class="model-actions"><button data-select-all type="button">Select all</button><button data-clear type="button">Clear</button></div>
 <div id="accuracy-models" class="checks" role="group" aria-label="Accuracy models"></div><div class="no-model-matches" hidden>No matching models.</div></div>
 </details></div>
-<div class="model-control"><span>Comparison baseline</span><strong id="baseline"></strong></div>
 <label>Scoring locations<select id="scope"><option value="states">States + DC</option><option value="states_pr">States + DC + Puerto Rico</option><option value="US">United States</option><option value="all">All (includes national)</option><option value="selected">Selected location above</option></select></label>
 <label>Horizon<select id="horizon"><option value="all">All horizons</option><option value="0">0 · nowcast</option><option value="1">1 week ahead</option><option value="2">2 weeks ahead</option><option value="3">3 weeks ahead</option></select></label>
 </div><div id="accuracy" class="tablewrap"></div>
@@ -338,7 +337,6 @@ traces.push({x:weeks,y:weeks.map(()=>0),text:weeks.map(d=>hover[d].join('<br>'))
 Plotly.react('chart',traces,{hoverdistance:-1,margin:{t:25,b:45,l:65,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},uirevision:[target,loc,history,...chosen].join('|'),xaxis:{type:'date',range:[begin,end],gridcolor:'#edf1f3',hoverformat:'%b %-d, %Y'},yaxis:{title:{text:mult===100?'Influenza ED visits (%)':'Hospital admissions'},range:[0,ymax*1.08],gridcolor:'#edf1f3'},legend:{orientation:'h',y:1.14,maxheight:.25},hovermode:'x unified',shapes:[{type:'line',x0:ref,x1:ref,y0:0,y1:1,yref:'paper',line:{color:'#95a7ae',dash:'dot',width:1}}]},{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
 }
 const mean=rows=>rows.length?rows.reduce((a,b)=>a+b,0)/rows.length:null;
-const geom=arr=>arr.length?(arr.includes(0)?0:Math.exp(mean(arr.map(Math.log)))):null;
 const key=r=>[r.reference_date,r.target,r.horizon,r.target_end_date,r.location].join('|');
 const fmt=(v,n=3)=>v===null||!Number.isFinite(v)?'—':v.toLocaleString(undefined,{maximumFractionDigits:n});
 const pct=v=>v===null||!Number.isFinite(v)?'—':(100*v).toFixed(1)+'%';
@@ -355,7 +353,6 @@ el('accuracy').innerHTML='<table><thead><tr>'+head+'</tr></thead><tbody>'+body+'
 function table(){const target=el('target').value,card=el('accuracy-card');
 card.hidden=target===PEAK_WEEK||target===PEAK_HEIGHT;if(card.hidden)return;
 let rows=D.scores.filter(r=>r.target===target);const scope=el('scope').value,h=el('horizon').value,base=target===TREND?D.trend_baseline:D.comparison_baseline,digits=target.includes('prop')?6:3;
-el('baseline').textContent=base;
 rows=rows.filter(r=>(scope==='all'||(scope==='states'?!['US','72'].includes(r.location):scope==='states_pr'?r.location!=='US':r.location===(scope==='selected'?el('location').value:scope)))&&(h==='all'||r.horizon===Number(h)));
 const available=new Set(rows.map(r=>r.model_id));
 el('accuracy-models').querySelectorAll('input').forEach(input=>input.disabled=!available.has(input.value));
@@ -364,7 +361,24 @@ if(!rows.length){el('accuracy').innerHTML='<div class="empty">No scored prospect
 const names=[...available].sort(),groups=Object.fromEntries(names.map(m=>[m,rows.filter(r=>r.model_id===m)])),maps=Object.fromEntries(names.map(m=>[m,new Map(groups[m].map(r=>[key(r),r]))]));
 const selected=new Set(selectedModels('accuracy-models')),visible=names.filter(m=>selected.has(m));
 if(!visible.length){el('accuracy').innerHTML='<div class="empty">No selected models have scored forecasts.</div>';return;}
-const theta=metric=>Object.fromEntries(names.map(m=>[m,geom(names.map(n=>{let a=0,b=0,count=0;groups[m].forEach(r=>{const other=maps[n].get(key(r));if(other){a+=r[metric];b+=other[metric];count++}});return count&&b>0?a/b:NaN}))]));
+function theta(metric){
+  return Object.fromEntries(names.map(model=>{
+    const logRatios=[0]; // log(1) for the model's self-comparison
+    for(const other of names){
+      if(other===model)continue;
+      let ownSum=0,otherSum=0;
+      for(const row of groups[model]){
+        const match=maps[other].get(key(row));
+        if(match && Number.isFinite(row[metric]) && Number.isFinite(match[metric])){
+          ownSum+=row[metric];otherSum+=match[metric];
+        }
+      }
+      const ratio=ownSum/otherSum;
+      if(!Number.isNaN(ratio))logRatios.push(Math.log(ratio));
+    }
+    return [model,names.length>1?Math.exp(mean(logRatios)):NaN];
+  }));
+}
 if(target===TREND){
 const data=visible.map(m=>{const g=groups[m],bm=maps[base]||new Map();let a=0,b=0,n=0;g.forEach(r=>{const br=bm.get(key(r));if(br){a+=r.rps;b+=br.rps;n++}});const skill=n&&b>0?1-a/b:null;
 return [m,g.length,n,mean(g.map(r=>r.rps)),skill,mean(g.map(r=>r.brier)),mean(g.map(r=>r.log_score)),mean(g.map(r=>r.accuracy)),mean(g.map(r=>r.absolute_category_error)),mean(g.map(r=>r.zero_observed_probability))];});

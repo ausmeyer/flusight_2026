@@ -316,22 +316,19 @@ def geometric(values) -> float:
 
 def relative_scores(group: pd.DataFrame, metric: str, baseline: str) -> dict:
     """scoringutils-style geometric mean of pairwise ratios; keys include target."""
-    models = group.model_id.unique()
-    theta = {}
-    for model in models:
-        ratios = []
-        for other in models:
-            a = group[group.model_id.eq(model)][UNIT + [metric]]
-            b = group[group.model_id.eq(other)][UNIT + [metric]]
-            pair = a.merge(b, on=UNIT, suffixes=("_a", "_b"), validate="one_to_one")
-            den = pair[f"{metric}_b"].sum()
-            if pair.empty or den <= 0:
-                ratios.append(np.nan)
-            else:
-                ratios.append(pair[f"{metric}_a"].sum() / den)
-        theta[model] = geometric(ratios) if np.isfinite(ratios).all() else np.nan
-    denominator = theta.get(baseline, np.nan)
-    return {k: v / denominator if denominator > 0 else np.nan for k, v in theta.items()}
+    scores = group.pivot(index=UNIT, columns="model_id", values=metric)
+    if baseline not in scores or len(scores.columns) < 2:
+        return dict.fromkeys(scores.columns, np.nan)
+    # totals[i, j] sums i's scores on cases that j also forecast.
+    totals = scores.fillna(0).to_numpy().T @ scores.notna().to_numpy(dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratios = totals / totals.T
+        np.fill_diagonal(ratios, 1.)
+        # scoringutils omits NA pair ratios and includes the self-comparison.
+        theta = np.exp(np.nanmean(np.log(ratios), axis=1))
+        denominator = theta[scores.columns.get_loc(baseline)]
+        relative = theta / denominator if denominator > 0 else np.full_like(theta, np.nan)
+    return dict(zip(scores.columns, np.where(np.isfinite(relative), relative, np.nan)))
 
 
 def summarize(scored: pd.DataFrame, *, baseline=FLUSIGHT_BASELINE, location="states", horizon="all") -> pd.DataFrame:

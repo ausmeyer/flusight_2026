@@ -81,6 +81,15 @@ def test_relative_mae_uses_pairwise_common_cases():
     assert result.loc["FluSight-baseline", "mae_skill"] == 0
 
 
+def test_relative_scores_skip_pairs_without_shared_forecasts():
+    rows = [("Early", 0, 2), ("Late", 1, 8), ("Baseline", 0, 4), ("Baseline", 1, 4)]
+    scored = pd.DataFrame(rows, columns=["model_id", "horizon", "wis"]).assign(
+        target=HOSP, location="01", reference_date="2026-10-10",
+        target_end_date=["2026-10-10", "2026-10-17", "2026-10-10", "2026-10-17"])
+    assert evaluation.relative_scores(scored, "wis", "Baseline") == pytest.approx(
+        {"Early": np.sqrt(.5), "Late": np.sqrt(2), "Baseline": 1})
+
+
 def test_comparison_models_refresh_and_work_from_offline_cache(tmp_path, monkeypatch, forecast):
     requested = []
 
