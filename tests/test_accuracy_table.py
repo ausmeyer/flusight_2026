@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is needed to execu
 
 
 def render(scores, *, target=HOSP, horizon="all", sort="Model", direction=1):
-    code = TEMPLATE[TEMPLATE.index("const mean=rows=>"):TEMPLATE.index("// Clarify saved ED notices")]
+    code = TEMPLATE[TEMPLATE.index("const mean=rows=>"):TEMPLATE.index("['reference','target','location','history'].forEach")]
     harness = r'''
 const input=JSON.parse(require('fs').readFileSync(0,'utf8'));
 const D={scores:input.scores,comparison_baseline:'FluSight-baseline',trend_baseline:'FluSight-baseline_cat'};

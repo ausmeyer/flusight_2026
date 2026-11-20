@@ -43,6 +43,7 @@ def test_page_unpacks_the_reviewed_data_with_every_quantile_level(root, tmp_path
     pd.concat([forecast, peak_forecasts]).to_csv(run / filename, index=False)
     manifest = {"run_id": "official_submissions/2026-10-10/fixture", "reference_date": "2026-10-10",
                 "preview": False, "quick": False, "settings": {"season": "2026-2027", "runtime": {"num_bags": 100}},
+                "notices": ["Using older data for the fixture forecast."],
                 "output_hashes": {filename: digest(run / filename)}}
     write_json(run / "manifest.json", manifest)
     write_json(run / "data-audit.json", {})
@@ -63,6 +64,8 @@ def test_page_unpacks_the_reviewed_data_with_every_quantile_level(root, tmp_path
     page = path.read_text()
     assert unpack(page) == payload
     assert '"model_id"' not in page  # The data are not also embedded uncompressed.
+    assert 'id="notices"' not in page
+    assert payload["manifest"]["notices"] == manifest["notices"]
     assert payload["quantile_levels"] == LEVELS
     weekly = {r["model_id"]: r["q"] for r in payload["forecasts"] if r["horizon"] == 0}
     assert weekly == {"MIGHTE-Base": list(range(10, 33)), "FluSight-ensemble": list(range(10, 33))}
