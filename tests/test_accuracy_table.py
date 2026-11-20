@@ -13,18 +13,25 @@ NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is needed to execute dashboard JavaScript")
 
 
-def render(scores, *, target=HOSP, horizon="all", sort="Model", direction=1):
-    code = TEMPLATE[TEMPLATE.index("const mean=rows=>"):TEMPLATE.index("['reference','target','location','history'].forEach")]
+def render(scores, *, target=HOSP, horizon="all", sort="Model", direction=1, models=None):
+    selection = TEMPLATE[TEMPLATE.index("const selectedModels="):TEMPLATE.index("let selectionGroup=")]
+    table = TEMPLATE[TEMPLATE.index("const mean=rows=>"):TEMPLATE.index("['reference','target','location','history'].forEach")]
     harness = r'''
 const input=JSON.parse(require('fs').readFileSync(0,'utf8'));
 const D={scores:input.scores,comparison_baseline:'FluSight-baseline',trend_baseline:'FluSight-baseline_cat'};
-const TREND='wk flu hosp rate change',controls={target:{value:input.target},scope:{value:'states'},horizon:{value:input.horizon},accuracy:{},location:{value:'01'}};
-const el=id=>controls[id],esc=value=>String(value),selectedModels=()=>[...new Set(D.scores.map(r=>r.model_id))];
+const TREND='wk flu hosp rate change',PEAK_WEEK='peak week inc flu hosp',PEAK_HEIGHT='peak inc flu hosp';
+const inputs=[...new Set(D.scores.map(r=>r.model_id))].map(value=>({value,checked:input.models===null||input.models.includes(value)}));
+const controls={target:{value:input.target},scope:{value:'states'},horizon:{value:input.horizon},accuracy:{},location:{value:'01'},baseline:{},'accuracy-card':{},
+models:{querySelectorAll:()=>[{value:'Other',checked:true}]},
+'accuracy-models':{getAttribute:()=> 'Accuracy models',querySelectorAll:selector=>inputs.filter(box=>
+    (!selector.includes(':checked')||box.checked)&&(!selector.includes(':disabled')||!box.disabled))},
+'accuracy-model-picker':{querySelector:()=>({setAttribute(){}})}};
+const el=id=>controls[id],esc=value=>String(value);
 '''
-    result = subprocess.run([NODE, "-e", harness + code +
+    result = subprocess.run([NODE, "-e", harness + selection + table +
                              "accuracySort={label:input.sort,direction:input.direction};table();console.log(el('accuracy').innerHTML);"],
                             input=json.dumps({"scores": scores, "target": target, "horizon": horizon,
-                                              "sort": sort, "direction": direction}),
+                                              "sort": sort, "direction": direction, "models": models}),
                             text=True, capture_output=True, check=True)
     html = result.stdout
     headers = re.findall(r'data-sort="([^"]+)"', html)
@@ -65,6 +72,14 @@ def test_mae_baseline_missing_or_zero_is_not_reported_as_skill(baseline_errors):
     _, rows, _ = render(scores)
     base = next(row for row in rows if row[0][1] == "MIGHTE-Base")
     assert base[4] == ("", "—") and base[5] == ("", "—")
+
+
+def test_accuracy_selection_filters_rows_without_changing_baseline_comparisons():
+    scores = weekly_scores()
+    _, all_rows, _ = render(scores)
+    _, selected_rows, _ = render(scores, models=["MIGHTE-Base"])
+    assert selected_rows == [row for row in all_rows if row[0][1] == "MIGHTE-Base"]
+    assert selected_rows[0][5] == ("positive", "50.0%")
 
 
 def test_trend_table_retains_categorical_metrics_and_skill_color():
