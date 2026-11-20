@@ -18,7 +18,7 @@ cd flusight_2026
 
 Setup creates a local `.venv` and installs the dependencies in [pyproject.toml](pyproject.toml). If [uv](https://docs.astral.sh/uv/) is installed, it uses [uv.lock](uv.lock). No separate requirements file or neighboring project is needed.
 
-The quick run downloads current data, fits reduced models, and opens an interactive forecast report in your browser. Without `--reference-date`, a preview anchors to the most recent week with released data for both targets and forecasts the following Saturday; a location missing that week is carried forward. `./mighte forecast` uses the round open for submission (Wednesday noon to Thursday 8 AM Eastern) and stops if that week's data are not out yet. To run the full models:
+The quick run downloads current data, fits reduced models, and opens an interactive forecast report in your browser. Without `--reference-date`, a preview anchors to the most recent week with released data for both targets and forecasts the following Saturday; a location missing that week is carried forward. `./mighte forecast` uses the round open for submission (normally Wednesday noon to Thursday 8 AM Eastern, with dated holiday exceptions) and stops if that week's data are not out yet. To run the full models:
 
 ```bash
 ./mighte preview
@@ -32,6 +32,18 @@ With the GitHub CLI (`gh`) installed and signed in, the weekly submission is:
 ```
 
 `submit` validates the latest production run and creates or updates the hub PR from your account's `main` branch in its `FluSight-forecast-hub` fork, with the reference date and model names and without an extra confirmation prompt. To submit only after forecasting succeeds, use `./mighte forecast && ./mighte submit`.
+
+For the November 14, 2026 reference date, CDC moved target releases to Thursday, November 12 and the deadline to 11 PM Eastern that day. The normal `./mighte forecast` and `./mighte submit` commands recognize this exception; a Thursday snapshot is required.
+
+For another exceptional schedule, explicitly bypass the time window:
+
+```bash
+./mighte forecast --ignore-window
+./mighte resume runs/official_submissions/REFERENCE/RUN_ID --ignore-window
+./mighte submit --ignore-window
+```
+
+Use the resume command only for an interrupted run. Each command requires its own override; it is recorded in the run manifest or submission receipt. Snapshot freshness, released target data, accepted hub rounds and forecast validation still apply. Runs outside the recognized submission window remain excluded from prospective scoring. To select a different round, also specify `forecast --reference-date YYYY-MM-DD` (a Saturday).
 
 To reopen the latest report:
 

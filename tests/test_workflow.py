@@ -262,14 +262,76 @@ def test_submission_upload_allowlist_rejects_other_files(tmp_path):
         create_pr(tmp_path, {"private.txt": path}, branch="codex/test", title="test", body="test")
 
 
-def test_snapshot_freshness_uses_eastern_calendar(root, tmp_path, monkeypatch):
+@pytest.mark.parametrize("ignore_window", [False, True])
+def test_snapshot_freshness_uses_eastern_calendar(root, tmp_path, monkeypatch, ignore_window):
     for directory in ["config", "hub-contract"]:
         shutil.copytree(root / directory, tmp_path / directory)
     snapshot = tmp_path / "data/snapshots/tuesday-evening"
     write_json(snapshot / "manifest.json", {"files": {}, "completed_at": "2026-10-07T01:00:00+00:00"})
     monkeypatch.setattr("mighte.pipeline.check_window", lambda *args: None)
     with pytest.raises(ValueError, match="fresh Wednesday"):
+        run_forecasts(tmp_path, "2026-10-10", snapshot=snapshot, ignore_window=ignore_window)
+
+
+@pytest.mark.parametrize("retrieved", ["2026-11-11T20:00:00+00:00", "2026-11-12T20:00:00+00:00"])
+def test_holiday_forecast_requires_thursday_snapshot(root, tmp_path, monkeypatch, retrieved):
+    from datetime import datetime
+    from mighte.contract import check_window
+
+    for directory in ["config", "hub-contract"]:
+        shutil.copytree(root / directory, tmp_path / directory)
+    snapshot = tmp_path / "data/snapshots/holiday"
+    shutil.copytree(root / "hub-contract", snapshot / "contract")
+    write_json(snapshot / "manifest.json", {"files": {}, "completed_at": retrieved})
+    monkeypatch.setattr("mighte.pipeline.check_window", lambda reference:
+                        check_window(reference, datetime.fromisoformat("2026-11-12T15:00:00-05:00")))
+
+    def prepared(*args):
+        raise RuntimeError("Reached input preparation")
+
+    monkeypatch.setattr("mighte.pipeline.prepare_inputs", prepared)
+    error, message = ((ValueError, "fresh Thursday") if "2026-11-11" in retrieved
+                      else (RuntimeError, "Reached input preparation"))
+    with pytest.raises(error, match=message):
+        run_forecasts(tmp_path, "2026-11-14", snapshot=snapshot)
+
+
+def test_window_override_survives_completion_but_requires_explicit_submission_override(root, tmp_path, monkeypatch):
+    _, snapshot = synthetic_project(root, tmp_path, with_ordinal=False)
+    metadata = json.loads((snapshot / "manifest.json").read_text())
+    write_json(snapshot / "manifest.json", {**metadata, "completed_at": "2026-10-07T20:00:00+00:00"})
+
+    def closed(*args):
+        raise ValueError("Submission window closed")
+
+    monkeypatch.setattr("mighte.pipeline.check_window", closed)
+    monkeypatch.setattr("mighte.pipeline.utc_now", lambda: "2026-10-08T14:00:00+00:00")
+    with pytest.raises(ValueError, match="Submission window closed"):
         run_forecasts(tmp_path, "2026-10-10", snapshot=snapshot)
+    run = run_forecasts(tmp_path, "2026-10-10", snapshot=snapshot, ignore_window=True)
+    manifest = verify_run(tmp_path, run)
+    assert manifest["window_override"] is True
+    assert manifest["submission_window"]["deadline"] == "2026-10-08T08:00:00-04:00"
+    assert any("--ignore-window" in notice for notice in manifest["notices"])
+    assert official_runs(tmp_path) == []
+    with pytest.raises(ValueError, match="cannot be submitted"):
+        verify_run(tmp_path, run, for_submission=True, ignore_window=True)
+    # Emulate a full-fit run's metadata to isolate the temporal submission checks.
+    manifest["settings"]["runtime"]["num_bags"] = 100
+    write_json(run / "manifest.json", manifest)
+    with pytest.raises(ValueError, match="Submission window closed"):
+        verify_run(tmp_path, run, for_submission=True)
+    assert verify_run(tmp_path, run, for_submission=True, ignore_window=True)["window_override"]
+
+
+def test_holiday_runs_enter_scoring_only_within_the_dated_window(tmp_path):
+    base = tmp_path / "runs/official_submissions/2026-11-14"
+    for name, completed in [("before-release", "2026-11-11T15:00:00-05:00"),
+                             ("on-time", "2026-11-12T22:30:00-05:00"),
+                             ("late", "2026-11-12T23:00:01-05:00")]:
+        write_json(base / name / "manifest.json", {"preview": False, "status": "complete",
+                   "reference_date": "2026-11-14", "created_at": completed, "completed_at": completed})
+    assert official_runs(tmp_path) == [base / "on-time"]
 
 
 def test_deadline_rechecked_after_github_preparation(tmp_path, monkeypatch):

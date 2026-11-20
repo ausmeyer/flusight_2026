@@ -24,6 +24,10 @@ QUANTILES = np.array([.01, .025, .05, .1, .15, .2, .25, .3, .35, .4, .45,
                       .5, .55, .6, .65, .7, .75, .8, .85, .9, .95, .975, .99])
 CATEGORIES = ["large_decrease", "decrease", "stable", "increase", "large_increase"]
 EASTERN = ZoneInfo("America/New_York")
+# CDC FluSight's November 6, 2026 notice moved target releases and the deadline to Thursday.
+SUBMISSION_WINDOW_OVERRIDES = {
+    "2026-11-14": ("2026-11-12T00:00:00-05:00", "2026-11-12T23:00:00-05:00"),
+}
 
 
 def read_forecast(path: Path) -> pd.DataFrame:
@@ -40,16 +44,24 @@ def reference_saturday(now: datetime | None = None) -> str:
     return (wednesday + timedelta(days=3)).isoformat()
 
 
-def check_window(reference: str, now: datetime | None = None) -> None:
-    """Production runs and submissions: Wednesday noon, after the week's data update, through
-    Thursday 8 AM Eastern, when the hub still accepts submissions."""
-    now = (now or datetime.now(EASTERN)).astimezone(EASTERN)
+def submission_window(reference: str) -> tuple[datetime, datetime]:
+    """The normal production window, with dated CDC schedule exceptions."""
+    if reference in SUBMISSION_WINDOW_OVERRIDES:
+        start, deadline = SUBMISSION_WINDOW_OVERRIDES[reference]
+        return datetime.fromisoformat(start).astimezone(EASTERN), datetime.fromisoformat(deadline).astimezone(EASTERN)
     ref = datetime.fromisoformat(reference).replace(tzinfo=EASTERN)
     start = (ref - timedelta(days=3)).replace(hour=12)
     deadline = (ref - timedelta(days=2)).replace(hour=8)
+    return start, deadline
+
+
+def check_window(reference: str, now: datetime | None = None) -> None:
+    """Check the production/submission window, including dated CDC exceptions."""
+    now = (now or datetime.now(EASTERN)).astimezone(EASTERN)
+    start, deadline = submission_window(reference)
     if not start <= now <= deadline:
         raise ValueError(f"Submission window: {start.isoformat()} through {deadline.isoformat()}. "
-                         "Use preview for an out-of-window rehearsal; it cannot be submitted.")
+                         "Use --ignore-window for an exceptional schedule, or preview for a non-submittable rehearsal.")
 
 
 class Contract:

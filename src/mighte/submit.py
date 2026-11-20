@@ -55,7 +55,7 @@ def open_pull_request(login: str, branch: str) -> dict | None:
 
 
 def update_pr(root: Path, files: dict[str, Path], pr: dict, fork: str, *, title: str, body: str,
-              reference: str | None) -> str:
+              reference: str | None, ignore_window=False) -> str:
     """Add one commit with the changed files to an open PR and refresh its text."""
     ref, head = pr["head"]["ref"], pr["head"]["sha"]
     changed = {}
@@ -79,7 +79,7 @@ def update_pr(root: Path, files: dict[str, Path], pr: dict, fork: str, *, title:
                        {"base_tree": base["tree"]["sha"], "tree": entries})
         commit = gh_json(["api", f"repos/{fork}/git/commits", "--method", "POST"],
                          {"message": title, "tree": tree["sha"], "parents": [head]})["sha"]
-        if reference:
+        if reference and not ignore_window:
             check_window(reference)
         gh_json(["api", f"repos/{fork}/git/refs/heads/{ref}", "--method", "PATCH"], {"sha": commit, "force": False})
     if pr["title"] != title or (pr.get("body") or "").strip() != body.strip():
@@ -92,13 +92,13 @@ def update_pr(root: Path, files: dict[str, Path], pr: dict, fork: str, *, title:
 
 
 def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, body: str,
-              reference: str | None = None) -> str:
+              reference: str | None = None, ignore_window=False) -> str:
     """Update an open PR, or prepare allowlisted changes on the requested fork branch."""
     if not files or any(not (name in {f"model-metadata/{m}.yml" for m in MODELS}
                               or any(name.startswith(f"model-output/{m}/") and name.endswith(f"-{m}.csv")
                                      for m in MODELS)) for name in files):
         raise ValueError("Refusing to upload files outside the MIGHTE submission allowlist")
-    if reference:
+    if reference and not ignore_window:
         check_window(reference)
     login = gh_json(["api", "user"])["login"]
     fork = f"{login}/FluSight-forecast-hub"
@@ -115,7 +115,8 @@ def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, bo
             if any(f["filename"] not in files or f.get("previous_filename", f["filename"]) not in files
                    for f in changed):
                 raise ValueError("Your fork's main branch has an open PR with other files; finish that PR first")
-        return update_pr(root, files, existing, fork, title=title, body=body, reference=reference)
+        return update_pr(root, files, existing, fork, title=title, body=body, reference=reference,
+                         ignore_window=ignore_window)
     if branch == "main":
         if reference:
             legacy = open_pull_request(login, f"codex/mighte-{reference}")
@@ -152,7 +153,7 @@ def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, bo
         new_commit = gh_json(["api", f"repos/{fork}/git/commits", "--method", "POST"],
                              {"message": title, "tree": tree["sha"], "parents": [head]})
     if branch == "main":
-        if reference:
+        if reference and not ignore_window:
             check_window(reference)
         if new_commit["sha"] != head:
             gh_json(["api", f"repos/{fork}/git/refs/heads/main", "--method", "PATCH"],
@@ -173,7 +174,7 @@ def create_pr(root: Path, files: dict[str, Path], *, branch: str, title: str, bo
             if prior["tree"]["sha"] != tree["sha"]:
                 raise ValueError(f"Branch {branch} already exists with different contents; inspect it on GitHub") from exc
             new_commit = prior
-    if reference:
+    if reference and not ignore_window:
         check_window(reference)  # Network preparation must not carry a submission past the deadline.
     result = gh_json(["api", f"repos/{UPSTREAM}/pulls", "--method", "POST"],
                      {"title": title, "head": f"{login}:{branch}", "base": "main", "body": body})
@@ -192,8 +193,9 @@ def register(root: Path) -> str:
                      body=(root / "docs/REGISTRATION_PR.md").read_text())
 
 
-def submit(root: Path, run: Path) -> str:
-    manifest = verify_run(root, run, for_submission=True)
+def submit(root: Path, run: Path, *, ignore_window=False) -> str:
+    override = {"ignore_window": True} if ignore_window else {}
+    manifest = verify_run(root, run, for_submission=True, **override)
     contract = fresh_contract(root)
     contract.validate_metadata(root / "model-metadata")
     files = {}
@@ -210,6 +212,7 @@ def submit(root: Path, run: Path) -> str:
     models = manifest.get("models", list(MODELS))
     title = f"MIGHTE forecasts for {reference}"
     body = f"{reference} forecasts from {', '.join(models)}."
-    url = create_pr(root, files, branch="main", title=title, body=body, reference=reference)
-    write_json(run / "submission.json", {"url": url, "submitted_at": utc_now(), "output_hashes": manifest["output_hashes"]})
+    url = create_pr(root, files, branch="main", title=title, body=body, reference=reference, **override)
+    write_json(run / "submission.json", {"url": url, "submitted_at": utc_now(), "output_hashes": manifest["output_hashes"],
+                                         "window_override": ignore_window})
     return url

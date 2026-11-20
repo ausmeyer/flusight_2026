@@ -362,16 +362,21 @@ def summarize(scored: pd.DataFrame, *, baseline=FLUSIGHT_BASELINE, location="sta
             continue
         raw_relative = relative_scores(target_group, "wis", baseline)
         log_relative = relative_scores(target_group, "wis_log1p", baseline)
+        mae_relative = relative_scores(target_group, "ae", baseline)
         base = target_group[target_group.model_id.eq(baseline)][UNIT + ["wis", "wis_log1p", "ae"]]
         for model, g in target_group.groupby("model_id"):
             pair = g.merge(base, on=UNIT, suffixes=("", "_baseline"), validate="one_to_one")
             den = pair.wis_baseline.sum()
             relative = float(pair.wis.sum() / den) if len(pair) and den > 0 else np.nan
+            mae_den = pair.ae_baseline.sum()
+            relative_mae = float(pair.ae.sum() / mae_den) if len(pair) and mae_den > 0 else np.nan
             record = {"target": target, "model_id": model, "n": len(g), "matched_n": len(pair),
                       "mean_wis": g.wis.mean(), "geo_mean_wis": geometric(g.wis),
                       "geo_mean_wis_log1p": geometric(g.wis_log1p), "mean_mae": g.ae.mean(),
                       "rmse": np.sqrt(g.se.mean()), "bias": g.bias.mean(),
                       "relative_wis": relative, "wis_skill": 1 - relative,
+                      "relative_mae": relative_mae, "mae_skill": 1 - relative_mae,
+                      "reichlab_relative_mae": mae_relative.get(model, np.nan),
                       "reichlab_relative_wis": raw_relative.get(model, np.nan),
                       "cdc_relative_wis": log_relative.get(model, np.nan),
                       **{f"coverage_{p}": g[f"coverage_{p}"].mean() for p in [50, 80, 95]}}

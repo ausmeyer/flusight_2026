@@ -1,7 +1,9 @@
 """A portable, offline HTML review of forecasts, provenance, and accuracy."""
 from __future__ import annotations
 
+import base64
 import colorsys
+import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -9,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 from plotly.offline import get_plotlyjs
 
-from .contract import CATEGORIES, ED, HOSP, PEAK_HEIGHT, PEAK_WEEK, TREND, UNIT, Contract, read_forecast
+from .contract import CATEGORIES, ED, HOSP, PEAK_HEIGHT, PEAK_WEEK, QUANTILES, TREND, UNIT, Contract, read_forecast
 from .data import latest_snapshot, verify_snapshot
 from .evaluate import FLUSIGHT_BASELINE, TREND_BASELINE, discover_benchmarks, evaluate, fetch_pr_forecasts, preview_runs, summarize
 from .pipeline import verify_run
@@ -18,6 +20,18 @@ from .util import digest, utc_now, write_json
 
 def records(frame: pd.DataFrame) -> list:
     return json.loads(frame.to_json(orient="records", date_format="iso"))
+
+
+LEVELS = [float(level) for level in QUANTILES]
+
+
+def quantile_records(frame: pd.DataFrame, keys: list, *, complete=False) -> list:
+    """One record per forecast, holding its values at every hub quantile level (LEVELS order) in "q"."""
+    wide = frame.assign(output_type_id=pd.to_numeric(frame.output_type_id)).pivot(
+        index=keys, columns="output_type_id", values="value").reindex(columns=LEVELS)
+    wide = wide.dropna(how="any" if complete else "all").reset_index()
+    return [{**row, "q": values} for row, values in
+            zip(records(wide[keys]), json.loads(wide[LEVELS].to_json(orient="values")))]
 
 
 def model_color(name: str) -> str:
@@ -65,35 +79,30 @@ def build_report(root: Path, run: Path, *, online=True, include_prs=()) -> Path:
         pending, included_prs = fetch_pr_forecasts(root, include_prs, set(forecasts.reference_date))
         # Scores and baselines were already computed using only the official archive.
         forecasts = pd.concat([forecasts, pending], ignore_index=True)
-    quantiles = forecasts[forecasts.target.isin([HOSP, ED]) & forecasts.output_type.eq("quantile")].copy()
-    quantiles["output_type_id"] = pd.to_numeric(quantiles.output_type_id)
-    quantiles = quantiles[quantiles.output_type_id.isin([.025, .25, .5, .75, .975])]
-    chart = quantiles.pivot(index=["model_id", *UNIT], columns="output_type_id", values="value").reset_index()
-    chart = chart.rename(columns={.025: "lo95", .25: "lo50", .5: "median", .75: "hi50", .975: "hi95"})
+    chart = quantile_records(forecasts[forecasts.target.isin([HOSP, ED]) & forecasts.output_type.eq("quantile")],
+                             ["model_id", *UNIT])
     categorical = forecasts[forecasts.target.eq(TREND) & forecasts.output_type.eq("pmf")]
     category_chart = categorical.pivot(index=["model_id", *UNIT], columns="output_type_id", values="value").reindex(
         columns=CATEGORIES).dropna().reset_index() if not categorical.empty else pd.DataFrame()
     peak_keys = ["model_id", "reference_date", "target", "location"]
-    height = forecasts[forecasts.target.eq(PEAK_HEIGHT) & forecasts.output_type.eq("quantile")].copy()
-    height["output_type_id"] = pd.to_numeric(height.output_type_id)
-    height_chart = height.pivot(index=peak_keys, columns="output_type_id", values="value").reindex(
-        columns=[.025, .25, .5, .75, .975]).dropna().reset_index().rename(
-        columns={.025: "lo95", .25: "lo50", .5: "median", .75: "hi50", .975: "hi95"})
+    height_chart = quantile_records(forecasts[forecasts.target.eq(PEAK_HEIGHT) & forecasts.output_type.eq("quantile")],
+                                    peak_keys, complete=True)
     timing_chart = forecasts[forecasts.target.eq(PEAK_WEEK) & forecasts.output_type.eq("pmf")][
         peak_keys + ["output_type_id", "value"]].rename(columns={"output_type_id": "peak_week", "value": "probability"})
     truth = pd.read_csv(snapshot / "truth.csv", dtype={"location": str})
     locations = pd.read_csv(snapshot / "contract/locations.csv", dtype={"location": str})
     payload = {"manifest": manifest, "generated_at": utc_now(), "truth_snapshot": snapshot.name,
                "data_audit": json.loads((run / "data-audit.json").read_text()),
-               "forecasts": records(chart), "truth": records(truth[["date", "target", "location", "value"]]),
-               "categorical_forecasts": records(category_chart), "categories": CATEGORIES,
-               "peak_height_forecasts": records(height_chart), "peak_week_forecasts": records(timing_chart),
+               "forecasts": chart, "truth": records(truth[["date", "target", "location", "value"]]),
+               "quantile_levels": LEVELS, "categorical_forecasts": records(category_chart), "categories": CATEGORIES,
+               "peak_height_forecasts": height_chart, "peak_week_forecasts": records(timing_chart),
                "scores": records(scores.drop(columns=[c for c in scores.columns if isinstance(c, float) or c in CATEGORIES], errors="ignore")),
                "locations": records(locations[["location", "location_name"]]),
                "benchmarks": [catalog_status, *benchmark_status],
                "comparison_models": comparison_models, "comparison_baseline": FLUSIGHT_BASELINE,
                "trend_baseline": TREND_BASELINE,
-               "default_models": ["MIGHTE-Base"],
+               # The weekly views open on the first of these with a forecast in the opening week.
+               "default_models": ["FluSight-ensemble", "MIGHTE-Base"],
                "model_colors": {m: model_color(m) for m in set(forecasts.model_id) | set(comparison_models)}}
     output = root / "reports" / manifest["run_id"]
     if included_prs:
@@ -107,8 +116,9 @@ def build_report(root: Path, run: Path, *, online=True, include_prs=()) -> Path:
         scores.to_csv(output / "scores.csv", index=False)
         summarize(scores).to_csv(output / "accuracy.csv", index=False)
     write_json(output / "report-data.json", payload)
-    html = TEMPLATE.replace("__PLOTLY__", get_plotlyjs()).replace(
-        "__DATA__", json.dumps(payload, allow_nan=False).replace("</", "<\\/"))
+    # The page carries its data gzip-compressed, far below GitHub's 100 MB file limit.
+    packed = gzip.compress(json.dumps(payload, allow_nan=False).encode(), compresslevel=9, mtime=0)
+    html = TEMPLATE.replace("__PLOTLY__", get_plotlyjs()).replace("__DATA__", base64.b64encode(packed).decode())
     path = output / "index.html"
     path.write_text(html)
     write_json(output / "review.json", {"run_id": manifest["run_id"],
@@ -141,6 +151,7 @@ background:white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 .timeline>label[hidden]{display:none}
 #chart{width:100%;height:440px}.tablewrap{overflow-x:auto;margin-top:15px}table{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 #chart .hoverlayer .legendlines{display:none}
+.chart-note{margin:10px 0 0;font-size:12px;color:#5c707b}.chart-note:empty{display:none}
 th{text-align:right;padding:11px 10px;background:#f0f5f7;color:#46606e;font-size:11px}td{text-align:right;padding:12px 10px;border-top:1px solid #e4ecef}th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:white}
 th button{border:0;background:none;color:inherit;font:inherit;font-weight:inherit;padding:0;cursor:pointer}th button:focus-visible{outline:2px solid #167f87;outline-offset:4px}
 .positive{color:#157267}.negative{color:#a24141}.empty{padding:30px;text-align:center;color:#6f808a}
@@ -161,18 +172,20 @@ details.model-picker{margin-top:0}@media(max-width:900px){.model-panel{left:0;ri
 <div class="timeline"><div class="week-navigation"><label for="week-slider">Browse forecast weeks</label><div class="week-slider">
 <button id="previous-week" type="button" aria-label="Previous forecast week">‹</button><input id="week-slider" type="range" min="0" step="1"><button id="next-week" type="button" aria-label="Next forecast week">›</button>
 </div></div><label>Ground-truth history<select id="history"><option value="recent">Year to date</option><option value="year" selected>Past year</option><option value="two_years">Past two years</option><option value="all">All available</option></select></label></div>
-<div id="chart"></div>
+<div id="chart"></div><p id="chart-note" class="chart-note"></p>
 </section>
 <section id="accuracy-card" class="card"><h2>Prospective accuracy to date</h2><div class="controls">
 <div class="model-control"><span>Comparison baseline</span><strong id="baseline"></strong></div>
 <label>Scoring locations<select id="scope"><option value="states">States + DC</option><option value="states_pr">States + DC + Puerto Rico</option><option value="US">United States</option><option value="all">All (includes national)</option><option value="selected">Selected location above</option></select></label>
 <label>Horizon<select id="horizon"><option value="all">All horizons</option><option value="0">0 · nowcast</option><option value="1">1 week ahead</option><option value="2">2 weeks ahead</option><option value="3">3 weeks ahead</option></select></label>
 </div><div id="accuracy" class="tablewrap"></div>
-</section></main><script>
-const D=__DATA__;
+</section></main><script type="module">
+const packed=atob('__DATA__'),bytes=new Uint8Array(packed.length);for(let i=0;i<packed.length;i++)bytes[i]=packed.charCodeAt(i);
+const D=await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).json();
 const el=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const options=(id,items)=>{el(id).innerHTML=items.map(([v,t])=>`<option value="${esc(v)}">${esc(t)}</option>`).join('')};
 const TREND='wk flu hosp rate change',PEAK_WEEK='peak week inc flu hosp',PEAK_HEIGHT='peak inc flu hosp';
+const LEVELS=D.quantile_levels,MID=LEVELS.indexOf(.5),HI95=LEVELS.indexOf(.975),BANDS=centralIntervals(LEVELS);
 const allForecasts=[...D.forecasts,...D.categorical_forecasts,...D.peak_height_forecasts,...D.peak_week_forecasts];
 const references=[...new Set(allForecasts.map(r=>r.reference_date))].sort();
 const seasonYear=Number(D.manifest.settings.season.split('-')[0]);
@@ -181,11 +194,38 @@ el('week-slider').max=references.length-1;el('week-slider').disabled=references.
 options('location',D.locations.filter(x=>allForecasts.some(r=>r.location===x.location)).sort((a,b)=>(b.location==='US')-(a.location==='US')||a.location_name.localeCompare(b.location_name)).map(x=>[x.location,x.location_name]));el('location').value='US';
 const modelNames=[...new Set([...allForecasts.map(r=>r.model_id),...D.comparison_models])].sort();
 const colors=D.model_colors;
-el('models').innerHTML=modelNames.map(m=>`<label><input type="checkbox" value="${esc(m)}" ${D.default_models.includes(m)?'checked':''}><span class="swatch" aria-hidden="true" style="background:${colors[m]}"></span>${esc(m)}</label>`).join('');
+const opening=openingModel(D.default_models,D.forecasts,{target:el('target').value,reference:el('reference').value,location:el('location').value})||D.default_models.find(m=>modelNames.includes(m));
+el('models').innerHTML=modelNames.map(m=>`<label><input type="checkbox" value="${esc(m)}" ${m===opening?'checked':''}><span class="swatch" aria-hidden="true" style="background:${colors[m]}"></span>${esc(m)}</label>`).join('');
 const selectedModels=()=>[...el('models').querySelectorAll('input:checked')].map(x=>x.value);
 let selectionGroup='weekly';const selections={};
 const rgba=(hex,a)=>`rgba(${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)},${a})`;
 const shiftDate=(date,days)=>new Date(Date.parse(date)+days*86400000).toISOString().slice(0,10);
+// Ridge and interval geometry: pure functions, also run by the tests in Node.
+// The first preferred model with a forecast in the opening view; the hub posts the ensemble after its deadline.
+function openingModel(preferred,forecasts,view){return preferred.find(m=>forecasts.some(r=>r.model_id===m&&r.target===view.target&&r.reference_date===view.reference&&r.location===view.location))}
+// Central intervals up to 95% as [lower level index, upper level index, percent], widest first.
+function centralIntervals(levels){return levels.map((p,i)=>[i,levels.length-1-i,Math.round(100*(levels[levels.length-1-i]-p))]).filter(([i,j,c])=>i<j&&c<=95)}
+// Each nested band adds the same opacity, so the k-th band inward reaches 1-(1-a)^k. Ridges use these steps as solid tints.
+const BAND_ALPHA=.065,bandOpacity=k=>1-(1-BAND_ALPHA)**k;
+function mix(hex,t){return '#'+[1,3,5].map(i=>Math.round(255-(255-parseInt(hex.slice(i,i+2),16))*t).toString(16).padStart(2,'0')).join('')}
+const erf=x=>{const t=1/(1+.3275911*Math.abs(x)),y=1-((((1.061405429*t-1.453152027)*t+1.421413741)*t-.284496736)*t+.254829592)*t*Math.exp(-x*x);return x<0?-y:y};
+const normalCdf=z=>.5*(1+erf(z/Math.SQRT2)),normalPdf=z=>Math.exp(-z*z/2)/Math.sqrt(2*Math.PI);
+// Density implied by quantiles: each step in probability spread evenly between neighbouring quantiles (a linear CDF),
+// smoothed by a normal kernel of width h so that tied quantiles stay finite.
+function quantileDensity(values,levels,xs,h){return xs.map(x=>{let d=0;for(let i=1;i<values.length;i++){const a=values[i-1],b=values[i],w=levels[i]-levels[i-1];
+d+=b-a<h/100?w*normalPdf((x-(a+b)/2)/h)/h:w*(normalCdf((x-a)/h)-normalCdf((x-b)/h))/(b-a)}return d})}
+function curveAt(xs,ys,x){const n=xs.length-1;if(x<=xs[0])return ys[0];if(x>=xs[n])return ys[n];let i=1;while(xs[i]<x)i++;return ys[i-1]+(ys[i]-ys[i-1])*(x-xs[i-1])/(xs[i]-xs[i-1])}
+// The x below which a piecewise-linear curve holds the fraction p of its area.
+function areaQuantile(xs,ys,p){const areas=xs.slice(1).map((x,i)=>(x-xs[i])*(ys[i]+ys[i+1])/2);let need=p*areas.reduce((a,b)=>a+b,0);
+for(let i=0;i<areas.length;i++){if(need>areas[i]&&i<areas.length-1){need-=areas[i];continue}
+const f=ys[i],slope=(ys[i+1]-f)/(xs[i+1]-xs[i]),r=Math.min(need,areas[i]),root=f+Math.sqrt(Math.max(0,f*f+2*slope*r));
+return xs[i]+(root>0?Math.min(xs[i+1]-xs[i],2*r/root):0)}return xs[0]}
+// Outline of the area under the curve from lo to hi, closed along the baseline.
+function areaBetween(xs,ys,lo,hi){lo=Math.max(lo,xs[0]);hi=Math.min(hi,xs[xs.length-1]);const px=[lo,lo],py=[0,curveAt(xs,ys,lo)];
+xs.forEach((x,i)=>{if(x>lo&&x<hi){px.push(x);py.push(ys[i])}});px.push(hi,hi);py.push(curveAt(xs,ys,hi),0);return [px,py]}
+// Ridges sorted by median, lowest or earliest at the top, on one vertical scale on which the tallest spans 1.4 rows.
+function stackRidges(curves){const sorted=[...curves].sort((a,b)=>a.median-b.median||a.model.localeCompare(b.model)),top=Math.max(0,...sorted.flatMap(c=>c.ys));
+return sorted.map((c,row)=>({...c,base:sorted.length-1-row,scale:top>0?1.4/top:0}))}
 function probabilityPlot(ref,loc,chosen){
 const rows=D.categorical_forecasts.filter(r=>r.reference_date===ref&&r.location===loc&&chosen.includes(r.model_id));
 const models=chosen.filter(m=>rows.some(r=>r.model_id===m)),n=Math.max(1,models.length),traces=[];
@@ -203,26 +243,41 @@ el('chart').style.height=height+'px';Plotly.react('chart',traces,layout,{respons
 }
 function peakPlot(ref,loc,target,chosen){
 const timing=target===PEAK_WEEK,source=timing?D.peak_week_forecasts:D.peak_height_forecasts;
-const rows=source.filter(r=>r.reference_date===ref&&r.location===loc&&chosen.includes(r.model_id)),traces=[];
-const models=chosen.filter(m=>rows.some(r=>r.model_id===m));
-const layout={margin:{t:timing?65:25,b:65,l:timing?75:165,r:25},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},annotations:[],showlegend:timing};
+const rows=source.filter(r=>r.reference_date===ref&&r.location===loc&&chosen.includes(r.model_id)),curves=[];
+const layout={margin:{t:20,b:65,l:10,r:25},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},annotations:[],showlegend:false,hovermode:'closest'};
 if(timing){
-models.forEach(model=>{const values=rows.filter(r=>r.model_id===model).sort((a,b)=>a.peak_week.localeCompare(b.peak_week));
-traces.push({type:'scatter',mode:'lines+markers',name:model,x:values.map(r=>r.peak_week),y:values.map(r=>r.probability),line:{color:colors[model],width:2.5},marker:{size:6},hovertemplate:`${esc(model)}<br>Week ending %{x|%b %-d, %Y}<br>Probability: %{y:.1%}<extra></extra>`})});
-const weeks=[...new Set(source.map(r=>r.peak_week))].sort();
-layout.xaxis={type:'date',title:{text:'Peak week ending'},tickformat:'%b %-d<br>%Y',tickmode:'array',tickvals:weeks.filter((_,i)=>i%4===0),gridcolor:'#edf1f3',...(weeks.length?{range:[shiftDate(weeks[0],-3),shiftDate(weeks[weeks.length-1],3)]}:{})};
-layout.yaxis={title:{text:'Probability of peak'},tickformat:'.0%',rangemode:'tozero',gridcolor:'#edf1f3'};
-layout.legend={orientation:'h',y:1.18,maxheight:.25};
+// Weekly probabilities joined by straight lines; interval ends split the area under that line.
+chosen.forEach(model=>{const weeks=rows.filter(r=>r.model_id===model).sort((a,b)=>a.peak_week.localeCompare(b.peak_week));
+const xs=weeks.map(r=>Date.parse(r.peak_week)),ys=weeks.map(r=>r.probability),at=p=>areaQuantile(xs,ys,p);
+if(xs.length>1&&ys.some(y=>y>0))curves.push({model,xs,ys,median:at(.5),bounds:BANDS.map(([i,j])=>[at(LEVELS[i]),at(LEVELS[j])])})});
+const weeks=[...new Set(source.map(r=>r.peak_week))].sort(),every=el('chart').clientWidth<600?8:4;
+layout.xaxis={type:'date',title:{text:'Peak week ending'},tickformat:'%b %-d<br>%Y',tickmode:'array',tickvals:weeks.filter((_,i)=>i%every===0),gridcolor:'#edf1f3',...(weeks.length?{range:[shiftDate(weeks[0],-3),shiftDate(weeks[weeks.length-1],3)]}:{})};
 }else{
-models.forEach(model=>{const r=rows.find(r=>r.model_id===model),c=colors[model];
-[['lo95','hi95',2],['lo50','hi50',8]].forEach(([lo,hi,width])=>traces.push({type:'scatter',mode:'lines',x:[r[lo],r[hi]],y:[model,model],line:{color:c,width},hoverinfo:'skip',showlegend:false}));
-traces.push({type:'scatter',mode:'markers',x:[r.median],y:[model],marker:{color:c,size:10,line:{color:'white',width:1}},customdata:[[r.lo50,r.hi50,r.lo95,r.hi95]],hovertemplate:`${esc(model)}<br>Median: %{x:,.0f}<br>50% interval: %{customdata[0]:,.0f}–%{customdata[1]:,.0f}<br>95% interval: %{customdata[2]:,.0f}–%{customdata[3]:,.0f}<extra></extra>`});
-});
-layout.xaxis={title:{text:'Peak weekly hospital admissions'},rangemode:'tozero',gridcolor:'#edf1f3'};
-layout.yaxis={type:'category',categoryorder:'array',categoryarray:models,autorange:'reversed',automargin:true,ticklabelstandoff:12,showgrid:false};
+// The axis ends just past the widest 95% interval; interval ends are the submitted quantiles themselves.
+const shown=chosen.map(m=>rows.find(r=>r.model_id===m)).filter(Boolean),end=Math.max(1,...shown.map(r=>r.q[HI95]))*1.05,grid=Array.from({length:241},(_,i)=>end*i/240);
+shown.forEach(r=>{const q=r.q,xs=[...new Set([...grid,...q.filter(v=>v>0&&v<end)])].sort((a,b)=>a-b);
+curves.push({model:r.model_id,xs,ys:quantileDensity(q,LEVELS,xs,Math.max(.08*(q[LEVELS.indexOf(.9)]-q[LEVELS.indexOf(.1)]),end/400)),median:q[MID],bounds:BANDS.map(([i,j])=>[q[i],q[j]])})});
+layout.xaxis={title:{text:'Peak weekly hospital admissions'},range:[0,end],gridcolor:'#edf1f3',zeroline:false};
 }
-if(!models.length)layout.annotations.push({text:'No selected peak forecasts for this week and location.',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false});
-el('chart').style.height=(timing?440:Math.max(350,models.length*48+90))+'px';
+const ridges=stackRidges(curves),traces=[],i50=BANDS.findIndex(b=>b[2]===50),i90=BANDS.findIndex(b=>b[2]===90);
+const day=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+ridges.forEach(c=>{const color=colors[c.model]||'#658091',y=v=>c.base+c.scale*v,x=v=>timing?v.map(ms=>new Date(ms).toISOString().slice(0,19)):v;
+// Timing intervals name the week holding each end.
+const label=timing?v=>day.format(c.xs.reduce((a,b)=>Math.abs(b-v)<Math.abs(a-v)?b:a)):v=>Math.round(v).toLocaleString();
+const summary=`<b>${esc(c.model)}</b><br>Median: ${label(c.median)}<br>50% interval: ${label(c.bounds[i50][0])} – ${label(c.bounds[i50][1])}<br>90% interval: ${label(c.bounds[i90][0])} – ${label(c.bounds[i90][1])}`;
+const area=(lo,hi,fill)=>{const [px,py]=areaBetween(c.xs,c.ys,lo,hi);traces.push({x:x(px),y:py.map(y),mode:'lines',line:{width:0},fill:'toself',fillcolor:fill,hoverinfo:'skip',showlegend:false})};
+// Ridges lower on the page are drawn later, so they hide the ones behind them.
+area(c.xs[0],c.xs[c.xs.length-1],'white');
+c.bounds.forEach(([lo,hi],k)=>area(lo,hi,mix(color,bandOpacity(k+1))));
+traces.push({x:x(c.xs),y:c.ys.map(y),mode:'lines',line:{color,width:1.5},hoverinfo:'skip',showlegend:false});
+traces.push({x:x([c.median,c.median]),y:[c.base,y(curveAt(c.xs,c.ys,c.median))],mode:'lines',line:{color,width:2},hoverinfo:'skip',showlegend:false});
+const points=c.xs.map((_,k)=>k).filter(k=>timing||k%4===0);
+traces.push({x:x(points.map(k=>c.xs[k])),y:points.map(k=>y(c.ys[k])),mode:'markers',marker:{size:12,color,opacity:0},showlegend:false,
+customdata:points.map(k=>c.ys[k]),hovertemplate:summary+(timing?'<br>Week ending %{x|%b %-d, %Y}: %{customdata:.1%}':'')+'<extra></extra>'});
+});
+layout.yaxis={tickmode:'array',tickvals:ridges.map(c=>c.base),ticktext:ridges.map(c=>c.model),range:[-.3,Math.max(1,...ridges.map(c=>c.base+c.scale*Math.max(...c.ys)))+.15],gridcolor:'#e3eaee',zeroline:false,fixedrange:true,automargin:true,ticklabelstandoff:12};
+if(!ridges.length)layout.annotations.push({text:'No selected peak forecasts for this week and location.',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false});
+layout.height=Math.max(360,85+50*(layout.yaxis.range[1]-layout.yaxis.range[0]));el('chart').style.height=layout.height+'px';
 Plotly.react('chart',traces,layout,{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
 }
 function plot(){const ref=el('reference').value,target=el('target').value,loc=el('location').value,mult=target.includes('prop')?100:1;
@@ -245,6 +300,8 @@ const traces=[],chosen=selectedModels();
 el('baseline').textContent=target===TREND?D.trend_baseline:D.comparison_baseline;
 el('history').parentElement.hidden=target===TREND||peak;
 el('accuracy-card').hidden=peak;
+const shading='central prediction intervals from 10% to 90% in steps of 10, plus 95%; darker is narrower.';
+el('chart-note').textContent=target===TREND?'':peak?`Each ridge is one model's forecast, sorted by median with the ${target===PEAK_WEEK?'earliest':'lowest'} at the top. Shading marks ${shading}${target===PEAK_HEIGHT?' Curves are smoothed from the submitted quantiles.':''}`:`Bands are ${shading}`;
 if(peak){peakPlot(ref,loc,target,chosen);return;}
 if(target===TREND){probabilityPlot(ref,loc,chosen);table();return;}
 el('chart').style.height='';
@@ -255,17 +312,19 @@ const start=history==='all'?(observed[0]?.date||references[0]):`${seasonYear-({r
 const begin=[start,shiftDate(references[0],-7)].sort()[0],end=[shiftDate(latest,28),observed[observed.length-1]?.date||latest].sort().pop();
 const truth=observed.filter(r=>r.date>=begin&&r.date<=end);
 const comparison=D.forecasts.filter(r=>r.target===target&&r.location===loc&&chosen.includes(r.model_id));
-const ymax=Math.max(1e-6,...truth.map(r=>r.value*mult),...comparison.filter(r=>r.target_end_date>=begin&&r.target_end_date<=end).map(r=>r.hi95*mult));
+const ymax=Math.max(1e-6,...truth.map(r=>r.value*mult),...comparison.filter(r=>r.target_end_date>=begin&&r.target_end_date<=end).map(r=>r.q[HI95]*mult));
 // The hover reads one invisible point per week that lists only that week's values. Unified hover over the
 // drawn series would add each series' nearest point within 20 px, e.g. the first forecast on the last observation.
 const hover={},note=(date,color,label,value)=>(hover[date]=hover[date]||[]).push(`<span style="color:${color}">\u25CF</span> ${label}: ${mult===100?value.toFixed(2):+value.toFixed(2)}`);
 truth.forEach(r=>note(r.date,'#253e4c','Observed',r.value*mult));
 traces.push({x:truth.map(r=>r.date),y:truth.map(r=>r.value*mult),name:'Observed · revised',mode:'lines+markers',line:{color:'#253e4c',width:2},marker:{size:6},hoverinfo:'skip'});
-chosen.forEach(model=>{const rows=comparison.filter(r=>r.reference_date===ref&&r.model_id===model).sort((a,b)=>a.horizon-b.horizon);if(!rows.length)return;
+chosen.forEach(model=>{const rows=comparison.filter(r=>r.reference_date===ref&&r.model_id===model&&r.q[MID]!==null).sort((a,b)=>a.horizon-b.horizon);if(!rows.length)return;
 const c=colors[model]||'#658091',x=rows.map(r=>r.target_end_date);
-rows.forEach(r=>note(r.target_end_date,c,esc(model.replace(/^MIGHTE-/,'')),r.median*mult));
-[['lo95','hi95',.08],['lo50','hi50',.15]].forEach(([lo,hi,a])=>{traces.push({x,y:rows.map(r=>r[lo]*mult),mode:'lines',line:{width:0},showlegend:false,hoverinfo:'skip',legendgroup:model});traces.push({x,y:rows.map(r=>r[hi]*mult),mode:'lines',line:{width:0},fill:'tonexty',fillcolor:rgba(c,a),showlegend:false,hoverinfo:'skip',legendgroup:model})});
-traces.push({x,y:rows.map(r=>r.median*mult),mode:'lines+markers',name:model,legendgroup:model,line:{color:c,width:2.5},marker:{size:8},hoverinfo:'skip'})});
+rows.forEach(r=>note(r.target_end_date,c,esc(model.replace(/^MIGHTE-/,'')),r.q[MID]*mult));
+// Nested central intervals, widest first: the overlapping fills darken toward the median.
+BANDS.forEach(([i,j])=>{const band=rows.filter(r=>r.q[i]!==null&&r.q[j]!==null),dates=band.map(r=>r.target_end_date);
+if(band.length)traces.push({x:[...dates,...[...dates].reverse()],y:[...band.map(r=>r.q[i]*mult),...band.map(r=>r.q[j]*mult).reverse()],mode:'lines',line:{width:0},fill:'toself',fillcolor:rgba(c,BAND_ALPHA),showlegend:false,hoverinfo:'skip',legendgroup:model})});
+traces.push({x,y:rows.map(r=>r.q[MID]*mult),mode:'lines+markers',name:model,legendgroup:model,line:{color:c,width:2.5},marker:{size:8},hoverinfo:'skip'})});
 const weeks=Object.keys(hover).sort();
 traces.push({x:weeks,y:weeks.map(()=>0),text:weeks.map(d=>hover[d].join('<br>')),mode:'markers',marker:{opacity:0},showlegend:false,hovertemplate:'%{text}<extra></extra>'});
 Plotly.react('chart',traces,{hoverdistance:-1,margin:{t:25,b:45,l:65,r:20},paper_bgcolor:'white',plot_bgcolor:'white',font:{family:'system-ui',color:'#375260'},uirevision:[target,loc,history,...chosen].join('|'),xaxis:{type:'date',range:[begin,end],gridcolor:'#edf1f3',hoverformat:'%b %-d, %Y'},yaxis:{title:{text:mult===100?'Influenza ED visits (%)':'Hospital admissions'},range:[0,ymax*1.08],gridcolor:'#edf1f3'},legend:{orientation:'h',y:1.14,maxheight:.25},hovermode:'x unified',shapes:[{type:'line',x0:ref,x1:ref,y0:0,y1:1,yref:'paper',line:{color:'#95a7ae',dash:'dot',width:1}}]},{responsive:true,displaylogo:false}).then(()=>Plotly.Plots.resize('chart'));
@@ -276,13 +335,13 @@ const key=r=>[r.reference_date,r.target,r.horizon,r.target_end_date,r.location].
 const fmt=(v,n=3)=>v===null||!Number.isFinite(v)?'—':v.toLocaleString(undefined,{maximumFractionDigits:n});
 const pct=v=>v===null||!Number.isFinite(v)?'—':(100*v).toFixed(1)+'%';
 let accuracySort={label:'Model',direction:1};
-function renderAccuracy(headers,rows,formatCell,skillColumn){
+function renderAccuracy(headers,rows,formatCell,skillColumns){
 if(!headers.includes(accuracySort.label))accuracySort={label:'Model',direction:1};
 const column=headers.indexOf(accuracySort.label),missing=v=>v===null||typeof v==='number'&&!Number.isFinite(v);
 rows.sort((a,b)=>{const av=a[column],bv=b[column],am=missing(av),bm=missing(bv);
 return am!==bm?(am?1:-1):am?a[0].localeCompare(b[0]):(typeof av==='number'?av-bv:av.localeCompare(bv))*accuracySort.direction||a[0].localeCompare(b[0]);});
 const head=headers.map((label,i)=>`<th scope="col" aria-sort="${i===column?(accuracySort.direction===1?'ascending':'descending'):'none'}"><button type="button" data-sort="${esc(label)}">${esc(label)}<span aria-hidden="true">${i===column?(accuracySort.direction===1?' ↑':' ↓'):' ↕'}</span></button></th>`).join('');
-const body=rows.map(row=>'<tr>'+row.map((value,i)=>`<td class="${i===skillColumn&&Number.isFinite(value)?(value>=0?'positive':'negative'):''}">${formatCell(value,i)}</td>`).join('')+'</tr>').join('');
+const body=rows.map(row=>'<tr>'+row.map((value,i)=>`<td class="${skillColumns.includes(i)&&Number.isFinite(value)?(value>=0?'positive':'negative'):''}">${formatCell(value,i)}</td>`).join('')+'</tr>').join('');
 el('accuracy').innerHTML='<table><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table>';
 }
 function table(){let rows=D.scores.filter(r=>r.target===el('target').value);const scope=el('scope').value,h=el('horizon').value,base=el('target').value===TREND?D.trend_baseline:D.comparison_baseline,digits=el('target').value.includes('prop')?6:3;
@@ -294,12 +353,12 @@ if(!visible.length){el('accuracy').innerHTML='<div class="empty">No selected mod
 const theta=metric=>Object.fromEntries(names.map(m=>[m,geom(names.map(n=>{let a=0,b=0,count=0;groups[m].forEach(r=>{const other=maps[n].get(key(r));if(other){a+=r[metric];b+=other[metric];count++}});return count&&b>0?a/b:NaN}))]));
 if(el('target').value===TREND){
 const data=visible.map(m=>{const g=groups[m],bm=maps[base]||new Map();let a=0,b=0,n=0;g.forEach(r=>{const br=bm.get(key(r));if(br){a+=r.rps;b+=br.rps;n++}});const skill=n&&b>0?1-a/b:null;
-return [m,g.length,n,mean(g.map(r=>r.rps)),mean(g.map(r=>r.brier)),mean(g.map(r=>r.log_score)),mean(g.map(r=>r.accuracy)),mean(g.map(r=>r.absolute_category_error)),skill,mean(g.map(r=>r.zero_observed_probability))];});
-renderAccuracy(['Model','N','Matched','RPS','Brier','Log score','Category accuracy','Category error','RPS skill','Zero-probability outcomes'],data,(value,i)=>i===0?esc(value):[6,8,9].includes(i)?pct(value):fmt(value),8);return;}
-const tr=theta('wis'),tl=theta('wis_log1p');
-const data=visible.map(m=>{const g=groups[m],bm=maps[base]||new Map();let a=0,b=0,n=0;g.forEach(r=>{const br=bm.get(key(r));if(br){a+=r.wis;b+=br.wis;n++}});const skill=n&&b>0?1-a/b:null;
-return [m,g.length,n,mean(g.map(r=>r.wis)),geom(g.map(r=>r.wis)),geom(g.map(r=>r.wis_log1p)),mean(g.map(r=>r.ae)),tr[base]>0?tr[m]/tr[base]:null,tl[base]>0?tl[m]/tl[base]:null,skill,mean(g.map(r=>r.coverage_50)),mean(g.map(r=>r.coverage_80)),mean(g.map(r=>r.coverage_95))];});
-renderAccuracy(['Model','N','Matched','Mean WIS','Geo WIS','Geo log-WIS','MAE','Rel WIS','Rel log-WIS','WIS skill','50% coverage','80% coverage','95% coverage'],data,(value,i)=>i===0?esc(value):i>=9?pct(value):fmt(value,[3,4,6].includes(i)?digits:i===5?Math.max(digits,5):3),9);}
+return [m,g.length,n,mean(g.map(r=>r.rps)),skill,mean(g.map(r=>r.brier)),mean(g.map(r=>r.log_score)),mean(g.map(r=>r.accuracy)),mean(g.map(r=>r.absolute_category_error)),mean(g.map(r=>r.zero_observed_probability))];});
+renderAccuracy(['Model','N','Matched','RPS','RPS skill','Brier','Log score','Category accuracy','Category error','Zero-probability outcomes'],data,(value,i)=>i===0?esc(value):[4,7,9].includes(i)?pct(value):fmt(value),[4]);return;}
+const tr=theta('wis'),tl=theta('wis_log1p'),ta=theta('ae');
+const data=visible.map(m=>{const g=groups[m],bm=maps[base]||new Map();let a=0,b=0,ma=0,mb=0,n=0;g.forEach(r=>{const br=bm.get(key(r));if(br){a+=r.wis;b+=br.wis;ma+=r.ae;mb+=br.ae;n++}});const skill=n&&b>0?1-a/b:null,maeSkill=n&&mb>0?1-ma/mb:null;
+return [m,g.length,n,mean(g.map(r=>r.ae)),ta[base]>0?ta[m]/ta[base]:null,maeSkill,mean(g.map(r=>r.wis)),tr[base]>0?tr[m]/tr[base]:null,tl[base]>0?tl[m]/tl[base]:null,skill,mean(g.map(r=>r.coverage_50)),mean(g.map(r=>r.coverage_80)),mean(g.map(r=>r.coverage_95))];});
+renderAccuracy(['Model','N','Matched','MAE','Rel MAE','MAE Skill','Mean WIS','Rel WIS','Rel log-WIS','WIS Skill','50% coverage','80% coverage','95% coverage'],data,(value,i)=>i===0?esc(value):i===5||i>=9?pct(value):fmt(value,[3,6].includes(i)?digits:3),[5,9]);}
 // Clarify saved ED notices without changing the original run record.
 const notices=(D.manifest.notices||[]).flatMap(n=>n.startsWith('ED visits: no ')?
 Object.entries(D.data_audit['wk inc flu prop ed visits'].anchor_missing).map(([loc,day])=>

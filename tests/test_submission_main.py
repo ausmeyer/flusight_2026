@@ -54,8 +54,8 @@ def main_submission(tmp_path, monkeypatch):
 
     monkeypatch.setattr(submission, "gh_json", github)
     monkeypatch.setattr(submission, "check_window", lambda reference: None)
-    return state, lambda: submission.create_pr(tmp_path, {FILE: path}, branch="main", title="weekly",
-                                               body="forecast", reference=REFERENCE)
+    return state, lambda **kwargs: submission.create_pr(tmp_path, {FILE: path}, branch="main", title="weekly",
+                                                        body="forecast", reference=REFERENCE, **kwargs)
 
 
 def test_weekly_pr_uses_synced_account_main_without_creating_a_branch(main_submission, tmp_path):
@@ -148,7 +148,21 @@ def test_deadline_is_checked_before_advancing_main(main_submission, monkeypatch)
     assert not any(endpoint.endswith(("/git/refs/heads/main", "/pulls")) for endpoint, _ in state["calls"])
 
 
-def test_weekly_entry_point_uses_main_and_preserves_pr_text(root, tmp_path, monkeypatch, forecast):
+@pytest.mark.parametrize("existing", [False, True])
+def test_explicit_window_override_reaches_new_and_updated_prs(main_submission, monkeypatch, existing):
+    state, submit = main_submission
+    if existing:
+        state["files"] = [{"filename": FILE}]
+        state["open"] = [{"number": 10, "html_url": "https://example.test/existing", "title": "weekly",
+                           "body": "forecast", "user": {"login": "test-user"},
+                           "head": {"ref": "main", "sha": "synced-head"}}]
+    monkeypatch.setattr(submission, "check_window", lambda reference: pytest.fail("Window override was ignored"))
+    assert submit(ignore_window=True) == f"https://example.test/{'existing' if existing else 'weekly'}"
+    assert (f"{FORK}/git/refs/heads/main", {"sha": "new-object", "force": False}) in state["calls"]
+
+
+@pytest.mark.parametrize("ignore_window", [False, True])
+def test_weekly_entry_point_uses_main_and_preserves_pr_text(root, tmp_path, monkeypatch, forecast, ignore_window):
     frame = forecast.copy()
     frame["reference_date"] = REFERENCE
     frame["target_end_date"] = (pd.to_datetime(frame.target_end_date) + pd.Timedelta(weeks=2)).dt.strftime("%Y-%m-%d")
@@ -160,7 +174,8 @@ def test_weekly_entry_point_uses_main_and_preserves_pr_text(root, tmp_path, monk
         frame.to_csv(path, index=False)
         paths[name] = "validated-hash"
     manifest = {"reference_date": REFERENCE, "output_hashes": paths, "models": list(MODELS)}
-    monkeypatch.setattr(submission, "verify_run", lambda *args, **kwargs: manifest)
+    validation = []
+    monkeypatch.setattr(submission, "verify_run", lambda *args, **kwargs: validation.append(kwargs) or manifest)
     monkeypatch.setattr(submission, "fresh_contract", lambda _: Contract(root / "hub-contract"))
     response = requests.Response()
     response.status_code = 200
@@ -168,7 +183,54 @@ def test_weekly_entry_point_uses_main_and_preserves_pr_text(root, tmp_path, monk
     captured = []
     monkeypatch.setattr(submission, "create_pr", lambda *args, **kwargs:
                         captured.append(kwargs) or "https://example.test/weekly")
-    assert submission.submit(root, tmp_path) == "https://example.test/weekly"
+    assert submission.submit(root, tmp_path, ignore_window=ignore_window) == "https://example.test/weekly"
+    override = {"ignore_window": True} if ignore_window else {}
+    assert validation == [{"for_submission": True, **override}]
     assert captured == [{"branch": "main", "title": f"MIGHTE forecasts for {REFERENCE}",
                          "body": f"{REFERENCE} forecasts from MIGHTE-Base, MIGHTE-Linear, MIGHTE-Nsemble.",
-                         "reference": REFERENCE}]
+                         "reference": REFERENCE, **override}]
+    assert json.loads((tmp_path / "submission.json").read_text())["window_override"] is ignore_window
+
+
+@pytest.mark.parametrize("command", ["forecast", "resume"])
+@pytest.mark.parametrize("ignore_window", [False, True])
+def test_forecast_cli_passes_explicit_window_override(tmp_path, monkeypatch, command, ignore_window):
+    from mighte import cli
+
+    arguments = ["mighte", command, *([str(tmp_path)] if command == "resume" else []), "--no-open"]
+    if ignore_window:
+        arguments.append("--ignore-window")
+    monkeypatch.setattr("sys.argv", arguments)
+    monkeypatch.setattr(cli, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "reference_saturday", lambda: REFERENCE)
+    captured = []
+    monkeypatch.setattr(cli, "run_forecasts", lambda *args, **kwargs: captured.append((args, kwargs)) or tmp_path)
+    monkeypatch.setattr(cli, "build_report", lambda *args: tmp_path / "report.html")
+    cli.main()
+    assert captured == [((tmp_path, REFERENCE), {"preview": False, "quick": False,
+                        "resume": tmp_path if command == "resume" else None,
+                        "snapshot": None, "ignore_window": ignore_window})]
+
+
+def test_submit_cli_passes_explicit_window_override(tmp_path, monkeypatch):
+    from mighte import cli
+
+    monkeypatch.setattr("sys.argv", ["mighte", "submit", "--run", str(tmp_path), "--ignore-window"])
+    monkeypatch.setattr(cli, "project_root", lambda: tmp_path)
+    calls = []
+    monkeypatch.setattr(cli, "verify_run", lambda *args, **kwargs:
+                        calls.append(("verify", args, kwargs)) or {"reference_date": REFERENCE})
+    monkeypatch.setattr(cli, "submit", lambda *args, **kwargs:
+                        calls.append(("submit", args, kwargs)) or "https://example.test/weekly")
+    cli.main()
+    assert calls == [("verify", (tmp_path, tmp_path), {"for_submission": True, "ignore_window": True}),
+                     ("submit", (tmp_path, tmp_path), {"ignore_window": True})]
+
+
+def test_preview_cli_rejects_window_override(monkeypatch):
+    from mighte import cli
+
+    monkeypatch.setattr("sys.argv", ["mighte", "preview", "--ignore-window"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2

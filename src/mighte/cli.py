@@ -26,6 +26,8 @@ def main():
                            else "Non-submittable rehearsal, including pre-season dates")
         p.add_argument("--reference-date", default=None)
         p.add_argument("--no-open", action="store_true")
+        if command == "forecast":
+            p.add_argument("--ignore-window", action="store_true", help="Override the production date window for this command")
         if command == "preview":
             p.add_argument("--quick", action="store_true", help="Two bags and fewer rounds; never submittable")
             p.add_argument("--snapshot", type=Path, help="Reuse a local data snapshot for this preview only")
@@ -34,6 +36,7 @@ def main():
     p = sub.add_parser("resume", help="Continue an interrupted run using its original immutable inputs")
     p.add_argument("run", type=Path)
     p.add_argument("--no-open", action="store_true")
+    p.add_argument("--ignore-window", action="store_true", help="Override the production date window for this command")
     for command in ["review", "validate", "submit", "publish"]:
         p = sub.add_parser(command)
         p.add_argument("--run", type=Path, default=None)
@@ -47,6 +50,7 @@ def main():
                            help="Include an open hub PR in a local-only comparison (repeatable)")
         if command == "submit":
             p.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)
+            p.add_argument("--ignore-window", action="store_true", help="Override submission date checks for this command")
         if command == "publish":
             p.add_argument("--yes", action="store_true", help="Confirm publishing this reviewed dashboard and its forecast files to GitHub")
     p = sub.add_parser("register", help="Review and confirm the metadata-only registration/update PR")
@@ -88,7 +92,8 @@ def main():
                                 or (None if args.command == "preview" else reference_saturday()),
                                 preview=args.command == "preview", quick=getattr(args, "quick", False),
                                 resume=args.run if args.command == "resume" else None,
-                                snapshot=getattr(args, "snapshot", None))
+                                snapshot=getattr(args, "snapshot", None),
+                                ignore_window=getattr(args, "ignore_window", False))
             path = build_report(root, run)
         elif args.command == "review":
             if args.refresh:
@@ -115,11 +120,12 @@ def main():
             return
         else:
             run = args.run or latest_run(root)
-            manifest = verify_run(root, run, for_submission=True)
+            override = {"ignore_window": True} if args.ignore_window else {}
+            manifest = verify_run(root, run, for_submission=True, **override)
             models = manifest.get("models", list(MODELS))
             print(f"Submitting {', '.join(models)} for {manifest['reference_date']}\nRun: {run}")
             print_notices(manifest.get("notices", []))
-            print(submit(root, run))
+            print(submit(root, run, **override))
             return
         print(f"Review: {path}")
         if not args.no_open:

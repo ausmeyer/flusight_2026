@@ -73,6 +73,15 @@ def test_window_is_wednesday_noon_to_thursday_8am_eastern_with_dst(reference, st
             check_window(reference, datetime.fromisoformat(outside))
 
 
+def test_veterans_day_window_uses_thursday_release_and_11pm_deadline():
+    for inside in ["2026-11-12T00:00:00-05:00", "2026-11-12T15:00:00-05:00",
+                   "2026-11-12T23:00:00-05:00"]:
+        check_window("2026-11-14", datetime.fromisoformat(inside))
+    for outside in ["2026-11-11T23:59:59-05:00", "2026-11-12T23:00:01-05:00"]:
+        with pytest.raises(ValueError, match="Submission window"):
+            check_window("2026-11-14", datetime.fromisoformat(outside))
+
+
 @pytest.mark.parametrize("reference", ["2026-09-25", "2026-9-26"])
 def test_runs_refuse_non_flusight_reference_dates_before_any_work(root, reference):
     from mighte.pipeline import run_forecasts

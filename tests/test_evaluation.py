@@ -35,9 +35,14 @@ def test_skill_and_coverage_use_matched_denominators(forecast):
     own = scored[scored.model_id.eq("MIGHTE-Base") & scored.horizon.eq(0)].wis.iloc[0]
     baseline = scored[scored.model_id.eq("FluSight-baseline")].wis.iloc[0]
     assert summary.loc["MIGHTE-Base", "wis_skill"] == pytest.approx(1 - own / baseline)
+    own_ae = scored[scored.model_id.eq("MIGHTE-Base") & scored.horizon.eq(0)].ae.iloc[0]
+    baseline_ae = scored[scored.model_id.eq("FluSight-baseline")].ae.iloc[0]
+    assert summary.loc["MIGHTE-Base", "relative_mae"] == pytest.approx(own_ae / baseline_ae)
+    assert summary.loc["MIGHTE-Base", "mae_skill"] == pytest.approx(1 - own_ae / baseline_ae)
     missing = summarize(scored[scored.model_id.ne("FluSight-baseline")]).set_index("model_id")
     assert missing.loc["MIGHTE-Base", "matched_n"] == 0
-    for metric in ["wis_skill", "reichlab_relative_wis", "cdc_relative_wis"]:
+    for metric in ["wis_skill", "reichlab_relative_wis", "cdc_relative_wis",
+                   "relative_mae", "mae_skill", "reichlab_relative_mae"]:
         assert pd.isna(missing.loc["MIGHTE-Base", metric])
 
 
@@ -56,6 +61,24 @@ def test_zero_baseline_skill_is_undefined(forecast):
     truth = pd.DataFrame({"target": [HOSP], "location": ["01"], "date": ["2026-10-10"], "value": [0.]})
     summary = summarize(score_quantiles(f, truth)).set_index("model_id")
     assert pd.isna(summary.loc["MIGHTE-Base", "wis_skill"])
+    assert pd.isna(summary.loc["MIGHTE-Base", "mae_skill"])
+    assert pd.isna(summary.loc["MIGHTE-Base", "reichlab_relative_mae"])
+
+
+def test_relative_mae_uses_pairwise_common_cases():
+    scored = pd.DataFrame([
+        {"model_id": model, "target": HOSP, "location": "01", "reference_date": "2026-10-10",
+         "target_end_date": f"2026-10-{10 + 7 * h}", "horizon": h, "ae": error, "wis": error,
+         "wis_log1p": error / 10, "se": error ** 2, "bias": error,
+         "coverage_50": 1, "coverage_80": 1, "coverage_95": 1}
+        for model, errors in [("MIGHTE-Base", [2., 10.]), ("FluSight-baseline", [4.]), ("Other", [4., 1.])]
+        for h, error in enumerate(errors)])
+    result = summarize(scored).set_index("model_id")
+    # Pairwise A/B=.5, A/Other=12/5, B/A=2, B/Other=1.
+    assert result.loc["MIGHTE-Base", "reichlab_relative_mae"] == pytest.approx(.6 ** (1 / 3))
+    assert result.loc["MIGHTE-Base", "mae_skill"] == .5
+    assert result.loc["FluSight-baseline", "reichlab_relative_mae"] == 1
+    assert result.loc["FluSight-baseline", "mae_skill"] == 0
 
 
 def test_comparison_models_refresh_and_work_from_offline_cache(tmp_path, monkeypatch, forecast):

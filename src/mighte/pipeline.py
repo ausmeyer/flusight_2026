@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from threadpoolctl import threadpool_limits
 
-from .contract import COLUMNS, ED, HOSP, PEAK_HEIGHT, PEAK_WEEK, TREND, MODELS, EASTERN, Contract, check_window, read_forecast
+from .contract import COLUMNS, ED, HOSP, PEAK_HEIGHT, PEAK_WEEK, TREND, MODELS, EASTERN, Contract, check_window, read_forecast, submission_window
 from .data import latest_released_reference, prepare_inputs, refresh, verify_snapshot
 from .models import covariate_weeks, distributional, equal_quantiles, linear, persistence_baseline
 from .peak_height import predict as predict_peak_height
@@ -165,7 +165,7 @@ def preview_seasonal(root: Path, source: Path, *, target=PEAK_HEIGHT, resume: Pa
 
 
 def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=False,
-                  resume: Path | None = None, snapshot: Path | None = None) -> Path:
+                  resume: Path | None = None, snapshot: Path | None = None, ignore_window=False) -> Path:
     """A preview without a reference date anchors to the most recent week with released data."""
     if resume is None and reference is not None:
         check_reference_date(reference)
@@ -192,7 +192,8 @@ def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=Fal
             return run
     else:
         if not preview:
-            check_window(reference)
+            if not ignore_window:
+                check_window(reference)
             if reference not in Contract(root / "hub-contract").by_target[HOSP]["task_ids"]["reference_date"]["optional"]:
                 raise ValueError("Reference date is outside FluSight rounds. Use ./mighte preview before the season.")
         snapshot = snapshot or refresh(root)
@@ -213,22 +214,33 @@ def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=Fal
                     "code_sha256": code_hash(root), "environment": environment(),
                     "historical_input_hashes": input_hashes(root, settings), "snapshot_id": snapshot.name,
                     "snapshot_manifest_sha256": digest(snapshot / "manifest.json")}
+        if not preview:
+            start, deadline = submission_window(reference)
+            manifest["submission_window"] = {"start": start.isoformat(), "deadline": deadline.isoformat()}
         settings = effective
         write_json(run / "manifest.json", manifest)
     verify_snapshot(snapshot)
     if digest(snapshot / "manifest.json") != manifest["snapshot_manifest_sha256"]:
         raise ValueError("Input snapshot manifest changed")
     if not preview:
-        check_window(reference)
+        if not ignore_window:
+            check_window(reference)
+        else:
+            manifest["window_override"] = True
+            write_json(run / "manifest.json", manifest)
+            print("Submission window checks overridden (--ignore-window).", flush=True)
         # Resumes never mix fresh data into an existing fit; refetch by starting a new run.
         retrieved_day = pd.Timestamp(verify_snapshot(snapshot)["completed_at"]).tz_convert(EASTERN).date()
-        if retrieved_day < (pd.Timestamp(reference) - pd.Timedelta(days=3)).date():
-            raise ValueError("Production forecasts require a fresh Wednesday data snapshot")
+        release_day = submission_window(reference)[0].date()
+        if retrieved_day < release_day:
+            raise ValueError(f"Production forecasts require a fresh {release_day:%A} data snapshot ({release_day})")
     contract = Contract(snapshot / "contract")
     location_map = dict(zip(contract.locations.location_name, contract.locations.location))
     names = dict(zip(contract.locations.location, contract.locations.location_name))
     histories, audit = prepare_inputs(root, snapshot, reference, settings)
     notices = audit["notices"]
+    if manifest.get("window_override"):
+        notices.append("Submission window checks overridden (--ignore-window); out-of-window runs are excluded from prospective scoring")
     audit["covariates"] = covariate_weeks(snapshot, reference)
     for key, label in [("nssp", "National NSSP"), ("ww", "WastewaterSCAN")]:
         week = audit["covariates"][key]
@@ -385,7 +397,7 @@ def run_forecasts(root: Path, reference: str | None, *, preview=False, quick=Fal
     baseline = pd.concat([persistence_baseline(history, reference, target, location_map, audit[target]["locations"])
                           for target, history in histories.items()])
     write_forecast(run / "local-baseline.csv", baseline)
-    if not preview:
+    if not preview and not ignore_window:
         check_window(reference)
     manifest.update(status="complete", completed_at=utc_now(), validation=validation,
                     models=sorted(forecasts), notices=notices,
@@ -429,7 +441,7 @@ def latest_run(root: Path, *, preview=False) -> Path:
     return root / "runs" / json.loads(path.read_text())["run_id"]
 
 
-def verify_run(root: Path, run: Path, *, for_submission=False) -> dict:
+def verify_run(root: Path, run: Path, *, for_submission=False, ignore_window=False) -> dict:
     manifest = json.loads((run / "manifest.json").read_text())
     if manifest["status"] != "complete":
         raise ValueError("Run is incomplete")
@@ -455,7 +467,8 @@ def verify_run(root: Path, run: Path, *, for_submission=False) -> dict:
     if for_submission:
         if manifest["preview"] or manifest["quick"] or manifest["settings"]["runtime"]["num_bags"] != 100:
             raise ValueError("Preview/reduced runs cannot be submitted")
-        check_window(manifest["reference_date"])
-        check_window(manifest["reference_date"], datetime.fromisoformat(manifest["created_at"]))
-        check_window(manifest["reference_date"], datetime.fromisoformat(manifest["completed_at"]))
+        if not ignore_window:
+            check_window(manifest["reference_date"])
+            check_window(manifest["reference_date"], datetime.fromisoformat(manifest["created_at"]))
+            check_window(manifest["reference_date"], datetime.fromisoformat(manifest["completed_at"]))
     return manifest

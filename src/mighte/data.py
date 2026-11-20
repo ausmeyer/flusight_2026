@@ -411,7 +411,7 @@ def prepare_inputs(root: Path, snapshot: Path, reference: str, settings: dict) -
         if len(missing) == len(expected):
             # No location has the anchor week: the week's release is not out, so stop rather than carry forward.
             raise ValueError(f"{LABELS[target]}: data for the week ending {anchor.date()} are not released yet "
-                             f"(latest reported week {max(missing.values())}); rerun after the Wednesday release")
+                             f"(latest reported week {max(missing.values())}); rerun after the scheduled target-data release")
         if missing:
             if target == ED:
                 notices.extend(f"{names[x]} ED: using older data (last reported {day}), without wastewater."

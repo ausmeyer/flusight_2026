@@ -146,12 +146,12 @@ def test_pending_report_preserves_official_report_scores_and_model_colors(
     assert {row["model_id"] for row in payload["forecasts"]} == {
         "MIGHTE-Base", "UMass-flusion", "UMass-flusion (pending PR #3766)"}
     assert payload["model_colors"]["UMass-flusion (pending PR #3766)"] == report.model_color("UMass-flusion")
-    assert payload["default_models"] == ["MIGHTE-Base"]
+    assert payload["default_models"] == ["FluSight-ensemble", "MIGHTE-Base"]
     assert payload["included_prs"][0]["number"] == 3766
     if include_peaks:
         assert len(payload["peak_height_forecasts"]) == 2
         assert len(payload["peak_week_forecasts"]) == 68
-        assert payload["peak_height_forecasts"][0]["median"] == 2100
+        assert payload["peak_height_forecasts"][0]["q"][payload["quantile_levels"].index(.5)] == 2100
         assert all("horizon" not in row and "target_end_date" not in row
                    for name in ["peak_height_forecasts", "peak_week_forecasts"] for row in payload[name])
     else:
